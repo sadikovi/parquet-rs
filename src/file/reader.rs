@@ -17,6 +17,7 @@
 
 use std::fs::File;
 use std::io::{self, Read, BufReader, Seek, SeekFrom};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use basic::{Type, Compression, Encoding};
@@ -26,9 +27,10 @@ use byteorder::{LittleEndian, ByteOrder};
 use thrift::protocol::TCompactInputProtocol;
 use parquet_thrift::parquet::FileMetaData as TFileMetaData;
 use parquet_thrift::parquet::{PageType, PageHeader};
-use schema::types::{self, SchemaDescriptor};
+use schema::types::{self, ColumnPath, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
+use record::reader::{ColumnBatch, RecordReader};
 use compression::{Codec, create_codec};
 use util::memory::{MemoryPool, ByteBufferPtr};
 
@@ -68,6 +70,8 @@ pub trait RowGroupReader<'a> {
 
   /// Get value reader for the `i`th column chunk
   fn get_column_reader(&self, i: usize) -> Result<ColumnReader>;
+
+  fn get_record_reader(&self, projection: SchemaType) -> Result<RecordReader>;
 }
 
 
@@ -242,6 +246,31 @@ impl<'a, 'm> RowGroupReader<'a> for SerializedRowGroupReader<'a, 'm> {
         ColumnReaderImpl::new(col_descr, col_page_reader)),
     };
     Ok(col_reader)
+  }
+
+  fn get_record_reader(&self, projection: SchemaType) -> Result<RecordReader> {
+    // check if projection is part of file schema
+    if !self.metadata().schema_descr().root_schema().check_contains(&projection) {
+      return Err(general_err!("Root schema does not contain projection"));
+    }
+    // build map of column path and index in metadata to get column reader
+    let mut paths: HashMap<&ColumnPath, usize> = HashMap::new();
+    for col_index in 0..self.num_columns() {
+      let col_path = self.metadata().column(col_index).column_path();
+      paths.insert(col_path, col_index);
+    }
+
+    // prune column paths that are not used in projection
+    let mut batches: HashMap<ColumnPath, ColumnBatch> = HashMap::new();
+    let proj_schema = SchemaDescriptor::new(Rc::new(projection));
+    for col_desc in proj_schema.columns() {
+      if let Some(col_index) = paths.get(col_desc.path()) {
+        let column_reader = self.get_column_reader(*col_index)?;
+        let batch = ColumnBatch::new(col_desc.physical_type(), column_reader, 4);
+        batches.insert(col_desc.path().clone(), batch);
+      }
+    }
+    Ok(RecordReader::new(self.metadata().num_rows(), proj_schema, batches))
   }
 }
 

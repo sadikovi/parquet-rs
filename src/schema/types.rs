@@ -75,7 +75,7 @@ impl Type {
   }
 
   /// Get physical type or panic if current type is not primitive
-  fn get_physical_type(&self) -> PhysicalType {
+  pub fn get_physical_type(&self) -> PhysicalType {
     match *self {
       Type::PrimitiveType { basic_info: _, physical_type, .. } => physical_type,
       _ => panic!("Cannot call get_physical_type() on a non-primitive type"),
@@ -368,7 +368,7 @@ impl BasicTypeInfo {
 // Parquet descriptor definitions
 
 /// Represents a path in a nested schema
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub struct ColumnPath {
   parts: Vec<String>
 }
