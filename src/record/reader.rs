@@ -15,13 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::collections::HashMap;
-
 use basic::{Type as PhysicalType};
 use column::reader::{ColumnReader, ColumnReaderImpl, get_typed_column_reader};
 use data_type::*;
 use errors::{Result, ParquetError};
-use schema::types::{ColumnPath, SchemaDescriptor, Type};
+use schema::types::{ColumnDescPtr, SchemaDescriptor, Type};
 
 pub trait ReadSupport<T> {
   fn new() -> T;
@@ -67,24 +65,24 @@ pub enum ColumnBatch<'a> {
 }
 
 impl<'a> ColumnBatch<'a> {
-  pub fn new(tpe: PhysicalType, reader: ColumnReader<'a>, batch_size: usize) -> Self {
-    match tpe {
+  pub fn new(descr: ColumnDescPtr, reader: ColumnReader<'a>, batch_size: usize) -> Self {
+    match descr.physical_type() {
       PhysicalType::BOOLEAN => ColumnBatch::BoolColumnBatch(
-        TypedColumnBatch::new(batch_size, reader)),
+        TypedColumnBatch::new(descr, batch_size, reader)),
       PhysicalType::INT32 => ColumnBatch::Int32ColumnBatch(
-        TypedColumnBatch::new(batch_size, reader)),
+        TypedColumnBatch::new(descr, batch_size, reader)),
       PhysicalType::INT64 => ColumnBatch::Int64ColumnBatch(
-        TypedColumnBatch::new(batch_size, reader)),
+        TypedColumnBatch::new(descr, batch_size, reader)),
       PhysicalType::INT96 => ColumnBatch::Int96ColumnBatch(
-        TypedColumnBatch::new(batch_size, reader)),
+        TypedColumnBatch::new(descr, batch_size, reader)),
       PhysicalType::FLOAT => ColumnBatch::FloatColumnBatch(
-        TypedColumnBatch::new(batch_size, reader)),
+        TypedColumnBatch::new(descr, batch_size, reader)),
       PhysicalType::DOUBLE => ColumnBatch::DoubleColumnBatch(
-        TypedColumnBatch::new(batch_size, reader)),
+        TypedColumnBatch::new(descr, batch_size, reader)),
       PhysicalType::BYTE_ARRAY => ColumnBatch::ByteArrayColumnBatch(
-        TypedColumnBatch::new(batch_size, reader)),
+        TypedColumnBatch::new(descr, batch_size, reader)),
       PhysicalType::FIXED_LEN_BYTE_ARRAY => ColumnBatch::FixedLenByteArrayColumnBatch(
-        TypedColumnBatch::new(batch_size, reader)),
+        TypedColumnBatch::new(descr, batch_size, reader)),
     }
   }
 
@@ -168,12 +166,16 @@ pub struct TypedColumnBatch<'a, T: DataType> {
 }
 
 impl<'a, T: DataType> TypedColumnBatch<'a, T> where T: 'static {
-  fn new(batch_size: usize, column_reader: ColumnReader<'a>) -> Self {
+  fn new(descr: ColumnDescPtr, batch_size: usize, column_reader: ColumnReader<'a>) -> Self {
+    assert!(batch_size > 0, "Expected positive batch size, found: {}", batch_size);
+    let def_levels = if descr.max_def_level() > 0 { vec![0; batch_size] } else { vec![0; 0] };
+    let rep_levels = if descr.max_rep_level() > 0 { vec![0; batch_size] } else { vec![0; 0] };
+
     Self {
       reader: get_typed_column_reader(column_reader),
       values: vec![T::T::default(); batch_size],
-      def_levels: vec![0; batch_size],
-      rep_levels: vec![0; batch_size],
+      def_levels: def_levels,
+      rep_levels: rep_levels,
       curr_index: 0,
       values_left: 0,
       can_buffer: true
@@ -197,11 +199,11 @@ impl<'a, T: DataType> TypedColumnBatch<'a, T> where T: 'static {
   }
 
   fn current_def_level(&self) -> i16 {
-    self.def_levels[self.curr_index]
+    if self.def_levels.len() == 0 { 0 } else { self.def_levels[self.curr_index] }
   }
 
   fn current_rep_level(&self) -> i16 {
-    self.rep_levels[self.curr_index]
+    if self.rep_levels.len() == 0 { 0 } else { self.rep_levels[self.curr_index] }
   }
 
   fn current_value(&self) -> &T::T {
@@ -214,14 +216,14 @@ impl<'a, T: DataType> TypedColumnBatch<'a, T> where T: 'static {
 pub struct RecordReader<'a> {
   num_rows: i64,
   projection: SchemaDescriptor,
-  batches: HashMap<ColumnPath, ColumnBatch<'a>>
+  batches: Vec<ColumnBatch<'a>>
 }
 
 impl<'a> RecordReader<'a> {
   pub fn new(
       num_rows: i64,
       projection: SchemaDescriptor,
-      batches: HashMap<ColumnPath, ColumnBatch<'a>>) -> Self {
+      batches: Vec<ColumnBatch<'a>>) -> Self {
     Self {
       num_rows: num_rows,
       projection: projection,
@@ -242,46 +244,6 @@ impl<'a> RecordReader<'a> {
     }
   }
 
-  fn traverse<R: ReadSupport<R>>(&self, ordinal: usize, tpe: &Type, record: &mut R) {
-    match tpe {
-      group @ &Type::GroupType { .. } => {
-        record.initialize_group(ordinal, group);
-        let mut index = 0;
-        for field in group.get_fields() {
-          self.traverse(index, field, record);
-          index += 1;
-        }
-        record.finalize_group(ordinal, group);
-      },
-      primitive @ &Type::PrimitiveType { .. } => {
-        match primitive.get_physical_type() {
-          PhysicalType::BOOLEAN => {
-            // let batch = self.get_column_batch::<BoolType>();
-            // record.add_boolean(ordinal, primitive, batch.next_value());
-          },
-          PhysicalType::INT32 => {
-
-          },
-          PhysicalType::INT64 => {
-
-          },
-          PhysicalType::INT96 => {
-
-          },
-          PhysicalType::FLOAT => {
-
-          },
-          PhysicalType::DOUBLE => {
-
-          },
-          PhysicalType::BYTE_ARRAY => {
-
-          },
-          PhysicalType::FIXED_LEN_BYTE_ARRAY => {
-
-          },
-        }
-      },
-    }
+  fn traverse<R: ReadSupport<R>>(&self, _ordinal: usize, _tpe: &Type, _record: &mut R) {
   }
 }

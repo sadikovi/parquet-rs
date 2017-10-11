@@ -253,22 +253,25 @@ impl<'a, 'm> RowGroupReader<'a> for SerializedRowGroupReader<'a, 'm> {
     if !self.metadata().schema_descr().root_schema().check_contains(&projection) {
       return Err(general_err!("Root schema does not contain projection"));
     }
-    // build map of column path and index in metadata to get column reader
+
+    // prepare map of column paths for pruning
     let mut paths: HashMap<&ColumnPath, usize> = HashMap::new();
     for col_index in 0..self.num_columns() {
       let col_path = self.metadata().column(col_index).column_path();
       paths.insert(col_path, col_index);
     }
 
-    // prune column paths that are not used in projection
-    let mut batches: HashMap<ColumnPath, ColumnBatch> = HashMap::new();
+    let batch_size = 4;
+    let mut batches: Vec<ColumnBatch> = Vec::new();
     let proj_schema = SchemaDescriptor::new(Rc::new(projection));
-    for col_desc in proj_schema.columns() {
-      if let Some(col_index) = paths.get(col_desc.path()) {
-        let column_reader = self.get_column_reader(*col_index)?;
-        let batch = ColumnBatch::new(col_desc.physical_type(), column_reader, 4);
-        batches.insert(col_desc.path().clone(), batch);
-      }
+    // prune column paths that are not used in projection
+    for col_index in 0..proj_schema.num_columns() {
+      let column_desc = proj_schema.column(col_index);
+      // this should never happen, because we check above that projection is part of schema
+      let orig_index = *paths.get(column_desc.path()).unwrap();
+      let column_reader = self.get_column_reader(orig_index)?;
+      let batch = ColumnBatch::new(column_desc, column_reader, batch_size);
+      batches.push(batch);
     }
     Ok(RecordReader::new(self.metadata().num_rows(), proj_schema, batches))
   }
