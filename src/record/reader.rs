@@ -22,18 +22,18 @@ use errors::{Result, ParquetError};
 use schema::types::{ColumnDescPtr, SchemaDescriptor, Type};
 
 pub trait ReadSupport<T> {
-  fn new() -> T;
+  fn get_root_converter(&mut self, schema: &Type) -> Converter;
 
-  fn initialize(&mut self);
-
-  fn finalize(&mut self);
-
-  fn initialize_group(&mut self, ordinal: usize, tpe: &Type);
-
-  fn finalize_group(&mut self, ordinal: usize, tpe: &Type);
+  fn get_current_record(&self) -> T;
 }
 
-pub trait PrimitiveConverter {
+pub trait Converter {
+  fn start(&mut self);
+
+  fn end(&mut self);
+
+  fn get_child_converter(&self, ordinal: usize) -> Converter;
+
   fn add_boolean(&mut self, value: bool);
 
   fn add_int32(&mut self, value: i32);
@@ -125,7 +125,7 @@ impl<'a> ColumnBatch<'a> {
     }
   }
 
-  pub fn update_value(&self, converter: &mut PrimitiveConverter) {
+  pub fn update_value(&self, converter: &mut Converter) {
     match *self {
       ColumnBatch::BoolColumnBatch(ref batch) => {
         converter.add_boolean(*batch.current_value());
@@ -232,6 +232,7 @@ impl<'a> RecordReader<'a> {
   }
 
   pub fn next<R: ReadSupport<R>>(&mut self) -> Option<R> {
+    /*
     if self.num_rows > 0 {
       let mut record = R::new();
       let root = self.projection.root_schema();
@@ -242,8 +243,7 @@ impl<'a> RecordReader<'a> {
     } else {
       None
     }
-  }
-
-  fn traverse<R: ReadSupport<R>>(&self, _ordinal: usize, _tpe: &Type, _record: &mut R) {
+    */
+    None
   }
 }
