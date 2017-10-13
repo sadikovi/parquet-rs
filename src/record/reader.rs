@@ -215,35 +215,20 @@ impl<'a, T: DataType> TypedColumnBatch<'a, T> where T: 'static {
 
 pub struct RecordReader<'a> {
   num_rows: i64,
-  projection: SchemaDescriptor,
+  proj: SchemaDescriptor,
   batches: Vec<ColumnBatch<'a>>
 }
 
 impl<'a> RecordReader<'a> {
-  pub fn new(
-      num_rows: i64,
-      projection: SchemaDescriptor,
-      batches: Vec<ColumnBatch<'a>>) -> Self {
-    Self {
-      num_rows: num_rows,
-      projection: projection,
-      batches: batches
-    }
+  pub fn new(num_rows: i64, proj: SchemaDescriptor, batches: Vec<ColumnBatch<'a>>) -> Self {
+    Self { num_rows: num_rows, proj: proj, batches: batches }
   }
 
   pub fn next<R: ReadSupport<R>>(&mut self) -> Option<R> {
-    /*
-    if self.num_rows > 0 {
-      let mut record = R::new();
-      let root = self.projection.root_schema();
-      record.initialize();
-      self.traverse(0, root, &mut record);
-      record.finalize();
-      Some(record)
-    } else {
-      None
+    if self.num_rows <= 0 {
+      return None;
     }
-    */
+    self.num_rows -= 1;
     None
   }
 }
