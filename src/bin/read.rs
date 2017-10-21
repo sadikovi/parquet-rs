@@ -77,7 +77,7 @@ fn main() {
   // let path = Path::new("data/parquet-v1.snappy.parquet");
   // let path = Path::new("data/parquet-v2.snappy.parquet");
   // let path = Path::new("data/parquet-v2.gz.parquet");
-  let path = Path::new("data/test_datapage_v2.snappy.parquet");
+  let path = Path::new("data/complex.snappy.parquet");
   let file = File::open(&path).unwrap();
   let parquet_reader = SerializedFileReader::new(file).unwrap();
   let metadata = parquet_reader.metadata();
@@ -99,19 +99,36 @@ fn main() {
       let column = row_group_metadata.column(j);
       let column_reader = row_group_reader.get_column_reader(j).unwrap();
 
+      // println!("* column descr: {:?}", column.column_descr());
+
       match (column.column_type(), &column.column_path().string()[..]) {
-        (Type::BYTE_ARRAY, "a") => {
+        (Type::INT32, "a") => {
           // field is UTF8, however, it is better to expliclty check logical type
-          let mut typed_reader = get_typed_column_reader::<ByteArrayType>(column_reader);
-          let (values_read, values, def, rep) = read_values(&mut typed_reader, batch_size);
-          println!("Read values: {}, values: {:?}, def: {:?}, rep: {:?}", values_read, values, def, rep);
-        },
-        (Type::INT32, "b") => {
           let mut typed_reader = get_typed_column_reader::<Int32Type>(column_reader);
           let (values_read, values, def, rep) = read_values(&mut typed_reader, batch_size);
           println!("Read values: {}, values: {:?}, def: {:?}, rep: {:?}", values_read, values, def, rep);
         },
-
+        (Type::INT32, "b") => {
+          // field is UTF8, however, it is better to expliclty check logical type
+          let mut typed_reader = get_typed_column_reader::<Int32Type>(column_reader);
+          let (values_read, values, def, rep) = read_values(&mut typed_reader, batch_size);
+          println!("Read values: {}, values: {:?}, def: {:?}, rep: {:?}", values_read, values, def, rep);
+        },
+        (Type::INT32, "b._1") => {
+          let mut typed_reader = get_typed_column_reader::<Int32Type>(column_reader);
+          let (values_read, values, def, rep) = read_values(&mut typed_reader, batch_size);
+          println!("Read values: {}, values: {:?}, def: {:?}, rep: {:?}", values_read, values, def, rep);
+        },
+        (Type::INT32, "b._2") => {
+          let mut typed_reader = get_typed_column_reader::<Int32Type>(column_reader);
+          let (values_read, values, def, rep) = read_values(&mut typed_reader, batch_size);
+          println!("Read values: {}, values: {:?}, def: {:?}, rep: {:?}", values_read, values, def, rep);
+        },
+        (Type::INT32, "c.list.element") => {
+          let mut typed_reader = get_typed_column_reader::<Int32Type>(column_reader);
+          let (values_read, values, def, rep) = read_values(&mut typed_reader, batch_size);
+          println!("Read values: {}, values: {:?}, def: {:?}, rep: {:?}", values_read, values, def, rep);
+        },
         (Type::INT32, "e.list.element") => {
           let mut typed_reader = get_typed_column_reader::<Int32Type>(column_reader);
           let (values_read, values, def, rep) = read_values(&mut typed_reader, batch_size);
