@@ -21,19 +21,23 @@ use data_type::*;
 use errors::{Result, ParquetError};
 use schema::types::{ColumnDescPtr, SchemaDescriptor, Type};
 
-pub trait ReadSupport<T> {
-  fn get_root_converter(&mut self, schema: &Type) -> Converter;
+pub trait RecordMaterializer<R> {
+  fn get_root_converter(&mut self, schema: &Type) -> &GroupConverter;
 
-  fn get_current_record(&self) -> T;
+  fn get_current_record(&mut self) -> R;
 }
 
-pub trait Converter {
+pub trait GroupConverter {
   fn start(&mut self);
 
   fn end(&mut self);
 
-  fn get_child_converter(&self, ordinal: usize) -> Converter;
+  fn get_child_group_converter(&self, ordinal: usize) -> &GroupConverter;
 
+  fn get_child_primitive_converter(&self, ordinal: usize) -> &PrimitiveConverter;
+}
+
+pub trait PrimitiveConverter {
   fn add_boolean(&mut self, value: bool);
 
   fn add_int32(&mut self, value: i32);
@@ -125,7 +129,7 @@ impl<'a> ColumnBatch<'a> {
     }
   }
 
-  pub fn update_value(&self, converter: &mut Converter) {
+  pub fn update_value(&self, converter: &mut PrimitiveConverter) {
     match *self {
       ColumnBatch::BoolColumnBatch(ref batch) => {
         converter.add_boolean(*batch.current_value());
@@ -213,22 +217,22 @@ impl<'a, T: DataType> TypedColumnBatch<'a, T> where T: 'static {
 
 // == Record reader ==
 
-pub struct RecordReader<'a> {
+pub struct ReadSupport<'a> {
   num_rows: i64,
   proj: SchemaDescriptor,
   batches: Vec<ColumnBatch<'a>>
 }
 
-impl<'a> RecordReader<'a> {
+impl<'a> ReadSupport<'a> {
   pub fn new(num_rows: i64, proj: SchemaDescriptor, batches: Vec<ColumnBatch<'a>>) -> Self {
     Self { num_rows: num_rows, proj: proj, batches: batches }
   }
 
-  pub fn next<R: ReadSupport<R>>(&mut self) -> Option<R> {
-    if self.num_rows <= 0 {
-      return None;
-    }
-    self.num_rows -= 1;
-    None
+  pub fn num_rows(&self) -> i64 {
+    self.num_rows
+  }
+
+  pub fn root_schema(&self) -> &Type {
+    self.proj.root_schema()
   }
 }

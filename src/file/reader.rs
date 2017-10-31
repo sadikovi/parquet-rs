@@ -30,7 +30,7 @@ use parquet_thrift::parquet::{PageType, PageHeader};
 use schema::types::{self, ColumnPath, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
-use record::reader::{ColumnBatch, RecordReader};
+use record::reader::{ColumnBatch, ReadSupport};
 use compression::{Codec, create_codec};
 use util::memory::{MemoryPool, ByteBufferPtr};
 
@@ -71,7 +71,7 @@ pub trait RowGroupReader<'a> {
   /// Get value reader for the `i`th column chunk
   fn get_column_reader(&self, i: usize) -> Result<ColumnReader>;
 
-  fn get_record_reader(&self, projection: SchemaType) -> Result<RecordReader>;
+  fn get_read_support(&self, projection: SchemaType) -> Result<ReadSupport>;
 }
 
 
@@ -248,7 +248,7 @@ impl<'a, 'm> RowGroupReader<'a> for SerializedRowGroupReader<'a, 'm> {
     Ok(col_reader)
   }
 
-  fn get_record_reader(&self, projection: SchemaType) -> Result<RecordReader> {
+  fn get_read_support(&self, projection: SchemaType) -> Result<ReadSupport> {
     // check if projection is part of file schema
     if !self.metadata().schema_descr().root_schema().check_contains(&projection) {
       return Err(general_err!("Root schema does not contain projection"));
@@ -273,7 +273,7 @@ impl<'a, 'm> RowGroupReader<'a> for SerializedRowGroupReader<'a, 'm> {
       let batch = ColumnBatch::new(column_desc, column_reader, batch_size);
       batches.push(batch);
     }
-    Ok(RecordReader::new(self.metadata().num_rows(), proj_schema, batches))
+    Ok(ReadSupport::new(self.metadata().num_rows(), proj_schema, batches))
   }
 }
 
