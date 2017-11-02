@@ -77,7 +77,7 @@ fn main() {
   // let path = Path::new("data/parquet-v1.snappy.parquet");
   // let path = Path::new("data/parquet-v2.snappy.parquet");
   // let path = Path::new("data/parquet-v2.gz.parquet");
-  let path = Path::new("data/complex.snappy.parquet");
+  let path = Path::new("data/nulls.snappy.parquet");
   let file = File::open(&path).unwrap();
   let parquet_reader = SerializedFileReader::new(file).unwrap();
   let metadata = parquet_reader.metadata();
@@ -86,7 +86,7 @@ fn main() {
 
   // CHANGE_ME: number of records requested, try changing it to return fewer or more records
   // note that table contains only 4 records, therefore 5+ records will be with default struct values.
-  let batch_size = 10;
+  let batch_size = 3;
   println!("Reading batch of records: {}", batch_size);
 
   for i in 0..metadata.num_row_groups() {
@@ -130,6 +130,11 @@ fn main() {
           println!("Read values: {}, values: {:?}, def: {:?}, rep: {:?}", values_read, values, def, rep);
         },
         (Type::INT32, "e.list.element") => {
+          let mut typed_reader = get_typed_column_reader::<Int32Type>(column_reader);
+          let (values_read, values, def, rep) = read_values(&mut typed_reader, batch_size);
+          println!("Read values: {}, values: {:?}, def: {:?}, rep: {:?}", values_read, values, def, rep);
+        },
+        (Type::INT32, "b_struct.b_c_int") => {
           let mut typed_reader = get_typed_column_reader::<Int32Type>(column_reader);
           let (values_read, values, def, rep) = read_values(&mut typed_reader, batch_size);
           println!("Read values: {}, values: {:?}, def: {:?}, rep: {:?}", values_read, values, def, rep);

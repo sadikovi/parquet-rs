@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use basic::{Type as PhysicalType};
+use basic::{Type as PhysicalType, Repetition};
 use column::reader::{ColumnReader, ColumnReaderImpl, get_typed_column_reader};
 use data_type::*;
 use errors::{Result, ParquetError};
@@ -161,22 +161,37 @@ impl<'a> ColumnBatch<'a> {
 
 pub struct TypedColumnBatch<'a, T: DataType> {
   reader: ColumnReaderImpl<'a, T>,
+  // type properties
+  is_required: bool,
+  max_def_level: i16,
+  max_rep_level: i16,
+  // values and levels
   values: Vec<T::T>,
   def_levels: Vec<i16>,
   rep_levels: Vec<i16>,
+  // indices and lengths
   curr_index: usize,
   values_left: usize,
+  // buffer properties
   can_buffer: bool
 }
 
 impl<'a, T: DataType> TypedColumnBatch<'a, T> where T: 'static {
   fn new(descr: ColumnDescPtr, batch_size: usize, column_reader: ColumnReader<'a>) -> Self {
     assert!(batch_size > 0, "Expected positive batch size, found: {}", batch_size);
-    let def_levels = if descr.max_def_level() > 0 { vec![0; batch_size] } else { vec![0; 0] };
-    let rep_levels = if descr.max_rep_level() > 0 { vec![0; batch_size] } else { vec![0; 0] };
+
+    let is_required = descr.repetition() == Repetition::REQUIRED;
+    let max_def_level = descr.max_def_level();
+    let max_rep_level = descr.max_rep_level();
+
+    let def_levels = if is_required { vec![0; 0] } else { vec![0; batch_size] };
+    let rep_levels = vec![0; batch_size];
 
     Self {
       reader: get_typed_column_reader(column_reader),
+      is_required: is_required,
+      max_def_level: max_def_level,
+      max_rep_level: max_rep_level,
       values: vec![T::T::default(); batch_size],
       def_levels: def_levels,
       rep_levels: rep_levels,
@@ -203,11 +218,19 @@ impl<'a, T: DataType> TypedColumnBatch<'a, T> where T: 'static {
   }
 
   fn current_def_level(&self) -> i16 {
-    if self.def_levels.len() == 0 { 0 } else { self.def_levels[self.curr_index] }
+    if self.is_required {
+      self.max_def_level
+    } else {
+      self.def_levels[self.curr_index]
+    }
   }
 
   fn current_rep_level(&self) -> i16 {
-    if self.rep_levels.len() == 0 { 0 } else { self.rep_levels[self.curr_index] }
+    if self.is_required {
+      self.max_rep_level
+    } else {
+      self.rep_levels[self.curr_index]
+    }
   }
 
   fn current_value(&self) -> &T::T {
