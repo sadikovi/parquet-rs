@@ -49,6 +49,9 @@ pub trait FileReader {
   /// the same as this. Otherwise, the row group metadata stored in the row group reader
   /// may outlive the file reader.
   fn get_row_group<'a>(&'a self, i: usize) -> Result<Box<RowGroupReader<'a> + 'a>>;
+
+  /// Method to read all data, e.g. from the file
+  fn read_data(&self);
 }
 
 /// Parquet row group reader API. With this, user can get metadata information about the
@@ -67,6 +70,9 @@ pub trait RowGroupReader<'a> {
 
   /// Get value reader for the `i`th column chunk
   fn get_column_reader(&self, i: usize) -> Result<ColumnReader>;
+
+  /// Read all data from row group
+  fn read_data(&self);
 }
 
 
@@ -175,6 +181,14 @@ impl FileReader for SerializedFileReader {
     let f = self.buf.get_ref().try_clone()?;
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
+
+  fn read_data(&self) {
+      println!("* reading file");
+      for i in 0..self.num_row_groups() {
+          println!("* reading row group {}", i);
+          self.get_row_group(i).unwrap().read_data();
+      }
+  }
 }
 
 /// A serialized impl for row group reader
@@ -240,6 +254,10 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
         ColumnReaderImpl::new(col_descr, col_page_reader)),
     };
     Ok(col_reader)
+  }
+
+  fn read_data(&self) {
+      // do nothing
   }
 }
 
