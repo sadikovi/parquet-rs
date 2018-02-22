@@ -5,7 +5,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use parquet::file::reader::{FileReader, SerializedFileReader};
-use parquet::schema::printer::print_file_metadata;
+use parquet::schema::printer::{print_file_metadata, print_schema};
 use parquet::schema::parser::parse_message_type;
 use parquet::schema::types::Type;
 use parquet::record::api::{GroupConverter, RecordMaterializer};
@@ -32,12 +32,17 @@ fn main() {
     let metadata = parquet_reader.metadata();
     print_file_metadata(&mut std::io::stdout(), metadata.file_metadata());
     println!();
+
     let schema = "
       message spark_schema {
         required int32 a;
       }
     ";
-    let schema = parse_message_type(schema).unwrap();
+    let schema = Rc::new(parse_message_type(schema).unwrap());
+    println!("Projected schema");
+    print_schema(&mut std::io::stdout(), &schema);
+    println!();
+
     let recmat = Rc::new(MyRecord {});
     parquet_reader.read_data(schema, recmat);
 }

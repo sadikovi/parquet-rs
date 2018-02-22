@@ -53,7 +53,7 @@ pub trait FileReader {
   fn get_row_group<'a>(&'a self, i: usize) -> Result<Box<RowGroupReader<'a> + 'a>>;
 
   /// Method to read all data, e.g. from the file
-  fn read_data(&self, projection: SchemaType, recmat: Rc<RecordMaterializer>);
+  fn read_data(&self, projection: Rc<SchemaType>, recmat: Rc<RecordMaterializer>);
 }
 
 /// Parquet row group reader API. With this, user can get metadata information about the
@@ -184,7 +184,7 @@ impl FileReader for SerializedFileReader {
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
 
-  fn read_data(&self, projection: SchemaType, recmat: Rc<RecordMaterializer>) {
+  fn read_data(&self, projection: Rc<SchemaType>, recmat: Rc<RecordMaterializer>) {
     // check if projection is part of file schema
     let root_schema = self.metadata().file_metadata().schema_descr().root_schema();
     if !root_schema.check_contains(&projection) {
@@ -193,10 +193,9 @@ impl FileReader for SerializedFileReader {
     }
 
     println!("* reading file");
-    let proj = Rc::new(projection);
     for i in 0..self.num_row_groups() {
       println!("* reading row group {}", i);
-      self.get_row_group(i).unwrap().read_data(proj.clone(), recmat.clone());
+      self.get_row_group(i).unwrap().read_data(projection.clone(), recmat.clone());
     }
   }
 }

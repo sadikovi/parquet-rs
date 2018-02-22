@@ -20,6 +20,7 @@ use data_type::*;
 
 pub trait RecordMaterializer {
   fn get_root_converter(&mut self, schema: &SchemaType) -> &GroupConverter;
+
   fn consume_current_record(&mut self);
 }
 
