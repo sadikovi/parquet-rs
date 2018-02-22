@@ -375,7 +375,7 @@ impl BasicTypeInfo {
 // Parquet descriptor definitions
 
 /// Represents a path in a nested schema
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub struct ColumnPath {
   parts: Vec<String>
 }

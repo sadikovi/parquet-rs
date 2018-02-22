@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, BufReader, Seek, SeekFrom};
 use std::rc::Rc;
@@ -26,7 +27,7 @@ use byteorder::{LittleEndian, ByteOrder};
 use thrift::protocol::TCompactInputProtocol;
 use parquet_thrift::parquet::FileMetaData as TFileMetaData;
 use parquet_thrift::parquet::{PageType, PageHeader};
-use schema::types::{self, SchemaDescriptor};
+use schema::types::{self, ColumnPath, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
@@ -51,7 +52,7 @@ pub trait FileReader {
   fn get_row_group<'a>(&'a self, i: usize) -> Result<Box<RowGroupReader<'a> + 'a>>;
 
   /// Method to read all data, e.g. from the file
-  fn read_data(&self);
+  fn read_data(&self, projection: SchemaType);
 }
 
 /// Parquet row group reader API. With this, user can get metadata information about the
@@ -72,7 +73,7 @@ pub trait RowGroupReader<'a> {
   fn get_column_reader(&self, i: usize) -> Result<ColumnReader>;
 
   /// Read all data from row group
-  fn read_data(&self);
+  fn read_data(&self, projection: Rc<SchemaType>);
 }
 
 
@@ -182,12 +183,20 @@ impl FileReader for SerializedFileReader {
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
 
-  fn read_data(&self) {
-      println!("* reading file");
-      for i in 0..self.num_row_groups() {
-          println!("* reading row group {}", i);
-          self.get_row_group(i).unwrap().read_data();
-      }
+  fn read_data(&self, projection: SchemaType) {
+    // check if projection is part of file schema
+    let root_schema = self.metadata().file_metadata().schema_descr().root_schema();
+    if !root_schema.check_contains(&projection) {
+      // return an error instead
+      panic!("Root schema does not contain projection");
+    }
+
+    println!("* reading file");
+    let proj = Rc::new(projection);
+    for i in 0..self.num_row_groups() {
+      println!("* reading row group {}", i);
+      self.get_row_group(i).unwrap().read_data(proj.clone());
+    }
   }
 }
 
@@ -256,8 +265,31 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
     Ok(col_reader)
   }
 
-  fn read_data(&self) {
-      // do nothing
+  fn read_data(&self, projection: Rc<SchemaType>) {
+    // prepare map of column paths for pruning
+    let mut paths: HashMap<&ColumnPath, usize> = HashMap::new();
+    for col_index in 0..self.num_columns() {
+      let col_path = self.metadata().column(col_index).column_path();
+      paths.insert(col_path, col_index);
+    }
+
+    let mut column_readers: Vec<ColumnReader> = Vec::new();
+    let proj_descr = SchemaDescriptor::new(projection);
+    // prune column paths that are not used in projection
+    for col_index in 0..proj_descr.num_columns() {
+      let column_desc = proj_descr.column(col_index);
+      // return an error instead of unwrap
+      let orig_index = *paths.get(column_desc.path()).unwrap();
+      let column_reader = self.get_column_reader(orig_index).unwrap();
+      column_readers.push(column_reader);
+    }
+
+    // extract number of rows in the current row group
+    let num_rows = self.metadata().num_rows();
+
+    for i in 0..num_rows {
+      println!("+ reading row {}, num column readers: {}", i, column_readers.len());
+    }
   }
 }
 
