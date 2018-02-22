@@ -117,14 +117,14 @@ impl Type {
     }
   }
 
-  fn is_primitive(&self) -> bool {
+  pub fn is_primitive(&self) -> bool {
     match *self {
       Type::PrimitiveType{ .. } => true,
       _ => false
     }
   }
 
-  fn is_group(&self) -> bool {
+  pub fn is_group(&self) -> bool {
     match *self {
       Type::GroupType{ .. } => true,
       _ => false
@@ -132,7 +132,7 @@ impl Type {
   }
 
   /// Whether this is the top-level schema type (message type).
-  fn is_schema(&self) -> bool {
+  pub fn is_schema(&self) -> bool {
     match *self {
       Type::GroupType{ ref basic_info, .. } => !basic_info.has_repetition(),
       _ => false

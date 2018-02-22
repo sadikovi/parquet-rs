@@ -22,7 +22,7 @@ pub trait RecordMaterializer {
   // this method is called once
   fn init(&mut self, schema: &SchemaType);
 
-  fn get_root_converter(&mut self) -> &mut GroupConverter;
+  fn root_converter(&mut self) -> &mut GroupConverter;
 
   fn consume_current_record(&mut self);
 }
@@ -32,9 +32,9 @@ pub trait GroupConverter {
 
   fn end(&mut self);
 
-  fn get_child_group_converter(&self, ordinal: usize) -> &mut GroupConverter;
+  fn child_group_converter(&mut self, ordinal: usize) -> &mut GroupConverter;
 
-  fn get_child_primitive_converter(&self, ordinal: usize) -> &mut PrimitiveConverter;
+  fn child_primitive_converter(&mut self, ordinal: usize) -> &mut PrimitiveConverter;
 }
 
 pub trait PrimitiveConverter {

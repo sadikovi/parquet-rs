@@ -216,8 +216,21 @@ impl<'a, 'm> SerializedRowGroupReader<'a> {
     Self { buf: buf, metadata: metadata }
   }
 
-  fn traverse(&self, gc: &mut GroupConverter) {
+  fn traverse(&self, tpe: &SchemaType, gc: &mut GroupConverter) {
+    // we never recurse to primitive types, they are processed as part of group type
     gc.start();
+    for (i, ptr) in tpe.get_fields().iter().enumerate() {
+      match ptr.as_ref() {
+        &SchemaType::PrimitiveType { .. } => {
+          let _pc = gc.child_primitive_converter(i);
+          println!("      update primitive value");
+        },
+        group_type @ &SchemaType::GroupType { .. } => {
+          let mut child = gc.child_group_converter(i);
+          self.traverse(group_type, child);
+        },
+      }
+    }
     gc.end();
   }
 }
@@ -296,7 +309,7 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
 
     for i in 0..num_rows {
       println!("  + reading row {}, num column readers: {}", i, column_readers.len());
-      self.traverse(rm.get_root_converter());
+      self.traverse(proj_descr.root_schema(), rm.root_converter());
       rm.consume_current_record();
     }
   }
