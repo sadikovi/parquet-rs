@@ -19,7 +19,10 @@ use schema::types::{Type as SchemaType};
 use data_type::*;
 
 pub trait RecordMaterializer {
-  fn get_root_converter(&mut self, schema: &SchemaType) -> &GroupConverter;
+  // this method is called once
+  fn init(&mut self, schema: &SchemaType);
+
+  fn get_root_converter(&mut self) -> &mut GroupConverter;
 
   fn consume_current_record(&mut self);
 }
@@ -29,9 +32,9 @@ pub trait GroupConverter {
 
   fn end(&mut self);
 
-  fn get_child_group_converter(&self, ordinal: usize) -> &GroupConverter;
+  fn get_child_group_converter(&self, ordinal: usize) -> &mut GroupConverter;
 
-  fn get_child_primitive_converter(&self, ordinal: usize) -> &PrimitiveConverter;
+  fn get_child_primitive_converter(&self, ordinal: usize) -> &mut PrimitiveConverter;
 }
 
 pub trait PrimitiveConverter {

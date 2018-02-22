@@ -2,26 +2,55 @@ extern crate parquet;
 
 use std::fs::File;
 use std::path::Path;
-use std::rc::Rc;
 
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::schema::printer::{print_file_metadata, print_schema};
 use parquet::schema::parser::parse_message_type;
 use parquet::schema::types::Type;
-use parquet::record::api::{GroupConverter, RecordMaterializer};
+use parquet::record::api::{GroupConverter, RecordMaterializer, PrimitiveConverter};
 
-struct MyRecord {}
+struct MyRecord {
+  root: MyGroup
+}
 
-impl MyRecord {}
+impl MyRecord {
+  fn new() -> Self {
+    MyRecord { root: MyGroup {} }
+  }
+}
 
 impl RecordMaterializer for MyRecord {
-  fn get_root_converter(&mut self, schema: &Type) -> &GroupConverter {
-    println!("creating root converter for schema: {:?}", schema);
-    unimplemented!();
+  fn init(&mut self, _schema: &Type) {
+    println!("* preparing RM");
+    self.root = MyGroup {};
+  }
+
+  fn get_root_converter(&mut self) -> &mut GroupConverter {
+    &mut self.root
   }
 
   fn consume_current_record(&mut self) {
-    println!("Consume current record");
+    println!("    consume current record");
+  }
+}
+
+struct MyGroup {}
+
+impl GroupConverter for MyGroup {
+  fn start(&mut self) {
+    println!("    start group");
+  }
+
+  fn end(&mut self) {
+    println!("    end group");
+  }
+
+  fn get_child_group_converter(&self, _ordinal: usize) -> &mut GroupConverter {
+    unimplemented!();
+  }
+
+  fn get_child_primitive_converter(&self, _ordinal: usize) -> &mut PrimitiveConverter {
+    unimplemented!();
   }
 }
 
@@ -38,11 +67,11 @@ fn main() {
         required int32 a;
       }
     ";
-    let schema = Rc::new(parse_message_type(schema).unwrap());
+    let schema = parse_message_type(schema).unwrap();
     println!("Projected schema");
     print_schema(&mut std::io::stdout(), &schema);
     println!();
 
-    let recmat = Rc::new(MyRecord {});
-    parquet_reader.read_data(schema, recmat);
+    let mut rm = Box::new(MyRecord::new()) as Box<RecordMaterializer>;
+    parquet_reader.read_data(schema, &mut rm);
 }
