@@ -65,21 +65,21 @@ impl GroupConverter for Converter {
 }
 
 impl PrimitiveConverter for Converter {
-  fn add_boolean(&mut self, _value: bool) { unimplemented!(); }
+  fn add_boolean(&mut self, value: bool) { println!(" >>> add {}", value); }
 
-  fn add_int32(&mut self, _value: i32) { unimplemented!(); }
+  fn add_int32(&mut self, value: i32) { println!(" >>> add {}", value); }
 
-  fn add_int64(&mut self, _value: i64) { unimplemented!(); }
+  fn add_int64(&mut self, value: i64) { println!(" >>> add {}", value); }
 
-  fn add_int96(&mut self, _value: Int96) { unimplemented!(); }
+  fn add_int96(&mut self, value: Int96) { println!(" >>> add {:?}", value); }
 
-  fn add_float(&mut self, _value: f32) { unimplemented!(); }
+  fn add_float(&mut self, value: f32) { println!(" >>> add {}", value); }
 
-  fn add_double(&mut self, _value: f64) { unimplemented!(); }
+  fn add_double(&mut self, value: f64) { println!(" >>> add {}", value); }
 
-  fn add_byte_array(&mut self, _value: ByteArray) { unimplemented!(); }
+  fn add_byte_array(&mut self, value: ByteArray) { println!(" >>> add {:?}", value); }
 
-  fn add_fixed_len_byte_array(&mut self, _value: ByteArray) { unimplemented!(); }
+  fn add_fixed_len_byte_array(&mut self, value: ByteArray) { println!(" >>> add {:?}", value); }
 }
 
 #[derive(Debug)]
