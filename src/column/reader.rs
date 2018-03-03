@@ -121,16 +121,18 @@ impl<'a, T: DataType> ColumnReaderImpl<'a, T> where T: 'static {
   ///
   /// This will try to read from the row group, and fills up at most `batch_size` values
   /// for `def_levels`, `rep_levels` and `values`. It will stop either when the row group
-  /// is depleted or `batch_size` values has been read.
+  /// is depleted or `batch_size` values has been read, or there is no space in the input
+  /// slices (values/definition levels/repetition levels).
   ///
   /// Note that in case the field being read is not required, `values` could contain less
-  /// values than `def_levels`. Also note that this will skip reading def/rep levels if
+  /// values than `def_levels`. Also note that this will skip reading def / rep levels if
   /// the field is required / not repeated, respectively.
   ///
   /// If `def_levels` or `rep_levels` is `None`, this will also skip reading the
   /// respective levels. This is useful when the caller of this function knows in advance
   /// that the field is required and non-repeated, therefore can avoid allocating memory
-  /// for the levels data.
+  /// for the levels data. Note that if field has definition levels, but caller provdes None,
+  /// there might be inconsistency between levels/values (see inline comments below).
   ///
   /// Returns a tuple where the first element is the actual number of values read,
   /// and the second element is the actual number of levels read.
