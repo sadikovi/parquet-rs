@@ -145,26 +145,37 @@ impl<'a, T: DataType> ColumnReaderImpl<'a, T> where T: 'static {
     let mut values_read = 0;
     let mut levels_read = 0;
 
-    while values_read < batch_size {
+    // Compute the smallest batch size we can read based on provided slices
+    let mut batch_size = ::std::cmp::min(batch_size, values.len());
+    if let Some(ref levels) = def_levels {
+      batch_size = ::std::cmp::min(batch_size, levels.len());
+    }
+    if let Some(ref levels) = rep_levels {
+      batch_size = ::std::cmp::min(batch_size, levels.len());
+    }
+
+    // Read exhaustively all pages until we read all batch_size values/levels
+    // or there are no more values/levels to read.
+    while ::std::cmp::max(values_read, levels_read) < batch_size {
       if !self.has_next()? {
         break;
       }
 
+      // Batch size for the current iteration
+      let iter_batch_size = ::std::cmp::min(
+        batch_size,
+        (self.num_buffered_values - self.num_decoded_values) as usize
+      );
+
       let mut values_to_read = 0;
       let mut num_def_levels = 0;
-      let num_rep_levels;
-
-      let next_levels_read = levels_read + ::std::cmp::min(
-        batch_size, (self.num_buffered_values - self.num_decoded_values) as usize);
+      let mut num_rep_levels = 0;
 
       // If the field is required and non-repeated, there are no definition levels
       if self.descr.max_def_level() > 0 && def_levels.as_ref().is_some() {
         if let Some(ref mut levels) = def_levels {
-          assert!(
-            levels.len() >= next_levels_read,
-            "def_levels.len() ({}) must be at least {}", levels.len(), next_levels_read);
           num_def_levels = self.read_def_levels(
-            &mut levels[levels_read..next_levels_read])?;
+            &mut levels[levels_read..levels_read + iter_batch_size])?;
           for i in levels_read..levels_read + num_def_levels {
             if levels[i] == self.descr.max_def_level() {
               values_to_read += 1;
@@ -172,30 +183,45 @@ impl<'a, T: DataType> ColumnReaderImpl<'a, T> where T: 'static {
           }
         }
       } else {
-        // Required field, read all values
-        values_to_read = batch_size;
+        // If max def level == 0, then it is REQUIRED field, read all values.
+        // If def levels is not provided, we still read all values.
+        values_to_read = iter_batch_size;
       }
 
       if self.descr.max_rep_level() > 0 && rep_levels.is_some() {
         if let Some(ref mut levels) = rep_levels {
-          assert!(
-            levels.len() >= next_levels_read,
-            "rep_levels.len() must be at least {}", next_levels_read);
           num_rep_levels = self.read_rep_levels(
-            &mut levels[levels_read..next_levels_read]
-          )?;
-          assert_eq!(
-            num_def_levels, num_rep_levels,
-            "Number of decoded rep / def levels did not match");
-          levels_read += num_rep_levels;
+            &mut levels[levels_read..levels_read + iter_batch_size])?;
+
+          // If definition levels are defined, check that rep levels == def levels
+          if def_levels.is_some() {
+            assert_eq!(
+              num_def_levels, num_rep_levels,
+              "Number of decoded rep / def levels did not match"
+            );
+          }
         }
       }
 
-      assert!(values.len() >= values_read + values_to_read,
-          "values.len() must be at least {}", values_read + values_to_read);
+      // At this point we have read values, definition and repetition levels.
+      // If both definition and repetition levels are defined, their counts
+      // should be equal. Values count is always less or equal to definition levels.
+      //
+      // Note that if field is not required, but no definition levels are provided,
+      // we would read values of batch size and (if provided, of course) repetition
+      // levels of batch size - [!] they will not be synced, because only definition
+      // levels enforce number of non-null values to read.
+
       let curr_values_read = self.read_values(
         &mut values[values_read..values_read + values_to_read])?;
-      self.num_decoded_values += ::std::cmp::max(num_def_levels, curr_values_read) as u32;
+
+      // Update all "return" counters and internal state.
+
+      // This is to account for when def or rep levels are not provided
+      let curr_levels_read = ::std::cmp::max(num_def_levels, num_rep_levels);
+      self.num_decoded_values +=
+        ::std::cmp::max(curr_levels_read, curr_values_read) as u32;
+      levels_read += curr_levels_read;
       values_read += curr_values_read;
     }
 
@@ -602,7 +628,7 @@ mod tests {
           &mut actual_values[curr_values_read..])
         .expect("read_batch() should be OK");
 
-        if values_read == 0 {
+        if values_read == 0 && levels_read == 0 {
           done = true;
         }
 
@@ -672,7 +698,7 @@ mod tests {
           &mut actual_values[curr_values_read..])
         .expect("read_batch() should be OK");
 
-        if values_read == 0 {
+        if values_read == 0 && levels_read == 0 {
           done = true;
         }
 
