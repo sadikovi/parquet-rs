@@ -178,6 +178,10 @@ impl ColumnChunkMetaData {
     self.column_descr.as_ref()
   }
 
+  pub fn column_descr_ptr(&self) -> ColumnDescPtr {
+    self.column_descr.clone()
+  }
+
   /// All encodings used for this column
   pub fn encodings(&self) -> &Vec<Encoding> {
     &self.encodings

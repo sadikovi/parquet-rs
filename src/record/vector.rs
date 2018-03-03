@@ -24,7 +24,7 @@ use schema::types::ColumnDescPtr;
 
 /// High level API wrapper on column reader.
 /// Provides per-element access for each primitive column.
-enum ColumnVector<'a> {
+pub enum ColumnVector<'a> {
   Int32ColumnVector(TypedColumnVector<'a, Int32Type>)
 }
 
@@ -41,7 +41,7 @@ impl<'a> ColumnVector<'a> {
 
   /// Invokes underlying typed column vector to buffer current value.
   /// Should be called once - either before `is_null` or `update_value`.
-  pub fn consume(&mut self) -> Result<()> {
+  pub fn consume(&mut self) -> Result<bool> {
     match *self {
       ColumnVector::Int32ColumnVector(ref mut typed) => {
         typed.consume()
@@ -69,11 +69,24 @@ impl<'a> ColumnVector<'a> {
       }
     }
   }
+
+  pub fn print_test_value(&self) {
+    let value = if self.is_null() {
+      None
+    } else {
+      match *self {
+        ColumnVector::Int32ColumnVector(ref typed) => {
+          Some(typed.current_value())
+        }
+      }
+    };
+    println!("  is_null: {}, value: {:?}", self.is_null(), value);
+  }
 }
 
 /// Internal column vector as a wrapper for column reader (primitive leaf column).
 /// Provides per-element access.
-struct TypedColumnVector<'a, T: DataType> {
+pub struct TypedColumnVector<'a, T: DataType> {
   reader: ColumnReaderImpl<'a, T>,
   batch_size: usize,
   // type properties
@@ -150,13 +163,11 @@ impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
   }
 
   /// Consumes and advances to the next triplet.
-  fn consume(&mut self) -> Result<()> {
-    if self.curr_triplet_index > self.triplets_left {
-      return Err(general_err!(
-        "Triplet index is out of bound, idx: {}, len: {}",
-        self.curr_triplet_index, self.triplets_left
-      ));
-    } else if self.curr_triplet_index == self.triplets_left {
+  /// Returns true, if there are more records to read, false there are no records left.
+  fn consume(&mut self) -> Result<bool> {
+    self.curr_triplet_index += 1;
+
+    if self.curr_triplet_index >= self.triplets_left {
       let (values_read, levels_read) = {
         // Get slice of definition levels, if available
         let def_levels = match self.def_levels {
@@ -178,6 +189,14 @@ impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
           &mut self.values
         )?
       };
+
+      // No more values or levels to read
+      if values_read == 0 && levels_read == 0 {
+        return Ok(false);
+      }
+
+      println!(" values_read: {}, levels_read: {}", values_read, levels_read);
+      println!(" values: {:?}, def_levels: {:?}, rep_levels: {:?}", self.values, self.def_levels, self.rep_levels);
 
       // We never read values more than levels
       if levels_read == 0 {
@@ -202,10 +221,8 @@ impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
           values_read, levels_read
         ));
       }
-    } else {
-      self.curr_triplet_index += 1;
     }
 
-    Ok(())
+    Ok(true)
   }
 }
