@@ -122,31 +122,18 @@ impl RecordMaterializer for MyRecord {
 }
 
 fn main() {
-    let path = Path::new("data/sample2.snappy.parquet");
+    let path = Path::new("data/nulls.snappy.parquet");
     let file = File::open(&path).unwrap();
     let parquet_reader = SerializedFileReader::new(file).unwrap();
     let metadata = parquet_reader.metadata();
     print_file_metadata(&mut std::io::stdout(), metadata.file_metadata());
     println!();
 
-    /*
-    let schema = "
-      message spark_schema {
-        required int32 a;
-      }
-    ";
-    */
+    // assign full schema as projected schema
+    let mut schema = Vec::new();
+    print_schema(&mut schema, metadata.file_metadata().schema_descr().root_schema());
+    let schema = parse_message_type(&String::from_utf8(schema).unwrap()).unwrap();
 
-    let schema = "
-      message spark_schema {
-        REQUIRED INT32 a;
-        OPTIONAL group b {
-          OPTIONAL INT32 _1;
-          OPTIONAL BOOLEAN _2;
-        }
-      }
-    ";
-    let schema = parse_message_type(schema).unwrap();
     println!("Projected schema");
     print_schema(&mut std::io::stdout(), &schema);
     println!();

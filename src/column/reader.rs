@@ -125,7 +125,7 @@ impl<'a, T: DataType> ColumnReaderImpl<'a, T> where T: 'static {
   ///
   /// Note that in case the field being read is not required, `values` could contain less
   /// values than `def_levels`. Also note that this will skip reading def/rep levels if
-  /// the field is not required / not repeated, respectively.
+  /// the field is required / not repeated, respectively.
   ///
   /// If `def_levels` or `rep_levels` is `None`, this will also skip reading the
   /// respective levels. This is useful when the caller of this function knows in advance

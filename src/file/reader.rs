@@ -289,7 +289,11 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
     // prepare map of column paths for pruning
     let mut paths: HashMap<&ColumnPath, usize> = HashMap::new();
     for col_index in 0..self.num_columns() {
-      let col_path = self.metadata().column(col_index).column_path();
+      let col_meta = self.metadata().column(col_index);
+      let col_descr = col_meta.column_descr();
+      println!("Column path: {:?}, idx: {}, max def level: {}, max rep level: {}",
+        col_meta.column_path(), col_index, col_descr.max_def_level(), col_descr.max_rep_level());
+      let col_path = col_meta.column_path();
       paths.insert(col_path, col_index);
     }
 

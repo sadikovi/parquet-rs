@@ -480,6 +480,10 @@ impl ColumnDescriptor {
     self.primitive_type.name()
   }
 
+  pub fn repetition(&self) -> Repetition {
+    self.primitive_type.get_basic_info().repetition()
+  }
+
   pub fn logical_type(&self) -> LogicalType {
     self.primitive_type.get_basic_info().logical_type()
   }
