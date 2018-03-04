@@ -294,7 +294,6 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
     let mut paths: HashMap<&ColumnPath, usize> = HashMap::new();
     for col_index in 0..self.num_columns() {
       let col_meta = self.metadata().column(col_index);
-      let col_descr = col_meta.column_descr();
       let col_path = col_meta.column_path();
       paths.insert(col_path, col_index);
     }
