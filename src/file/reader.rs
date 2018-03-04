@@ -32,6 +32,8 @@ use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
 use record::api::{GroupConverter, RecordMaterializer};
+use record::vector::ColumnVector;
+use record::reader::RecordReader;
 use util::memory::ByteBufferPtr;
 
 // ----------------------------------------------------------------------
@@ -184,6 +186,8 @@ impl FileReader for SerializedFileReader {
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
 
+  // TODO: add number of records to read as option - if provided we return at most that value,
+  // otherwise, read all records.
   fn read_data(&self, mut projection: SchemaType, rm: &mut Box<RecordMaterializer>) {
     // check if projection is part of file schema
     let root_schema = self.metadata().file_metadata().schema_descr().root_schema();
@@ -291,31 +295,24 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
     for col_index in 0..self.num_columns() {
       let col_meta = self.metadata().column(col_index);
       let col_descr = col_meta.column_descr();
-      println!("Column path: {:?}, idx: {}, max def level: {}, max rep level: {}",
-        col_meta.column_path(), col_index, col_descr.max_def_level(), col_descr.max_rep_level());
       let col_path = col_meta.column_path();
       paths.insert(col_path, col_index);
     }
 
-    let mut column_readers: Vec<ColumnReader> = Vec::new();
-    let proj_descr = SchemaDescriptor::new(projection);
+    let mut column_vectors: Vec<ColumnVector> = Vec::new();
+    let proj_descr = &SchemaDescriptor::new(projection);
     // prune column paths that are not used in projection
     for col_index in 0..proj_descr.num_columns() {
       let column_desc = proj_descr.column(col_index);
       // return an error instead of unwrap
       let orig_index = *paths.get(column_desc.path()).unwrap();
       let column_reader = self.get_column_reader(orig_index).unwrap();
-      column_readers.push(column_reader);
+      let mut column_vector = ColumnVector::new(column_desc, column_reader, 4);
+      column_vectors.push(column_vector);
     }
 
-    // extract number of rows in the current row group
-    let num_rows = self.metadata().num_rows();
-
-    for i in 0..num_rows {
-      println!("  + reading row {}, num column readers: {}", i, column_readers.len());
-      self.traverse(proj_descr.root_schema(), rm.root_converter());
-      rm.consume_current_record();
-    }
+    let mut reader = RecordReader::new(proj_descr, rm, column_vectors);
+    reader.read_records(self.metadata().num_rows() as usize);
   }
 }
 
