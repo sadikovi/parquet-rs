@@ -31,7 +31,7 @@ use schema::types::{self, ColumnPath, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
-use record::api::{GroupConverter, RecordMaterializer};
+use record::api::RecordMaterializer;
 use record::vector::ColumnVector;
 use record::reader::RecordReader;
 use util::io::FileHandle;
@@ -219,24 +219,6 @@ impl<'a, 'm> SerializedRowGroupReader<'a> {
   pub fn new(file: File, metadata: &'a RowGroupMetaData) -> Self {
     let buf = BufReader::new(file);
     Self { buf: buf, metadata: metadata }
-  }
-
-  fn traverse(&self, tpe: &SchemaType, gc: &mut GroupConverter) {
-    // we never recurse to primitive types, they are processed as part of group type
-    gc.start();
-    for (i, ptr) in tpe.get_fields().iter().enumerate() {
-      match ptr.as_ref() {
-        &SchemaType::PrimitiveType { .. } => {
-          let _pc = gc.child_primitive_converter(i);
-          println!("      update primitive value");
-        },
-        group_type @ &SchemaType::GroupType { .. } => {
-          let mut child = gc.child_group_converter(i);
-          self.traverse(group_type, child);
-        },
-      }
-    }
-    gc.end();
   }
 }
 
