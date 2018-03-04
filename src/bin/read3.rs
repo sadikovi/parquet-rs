@@ -25,7 +25,7 @@ use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::schema::printer::print_file_metadata;
 
 fn main() {
-  let path = Path::new("data/alltypes_plain.snappy.parquet");
+  let path = Path::new("data/complex.snappy.parquet");
   let file = File::open(&path).unwrap();
   let parquet_reader = SerializedFileReader::new(file).unwrap();
   let metadata = parquet_reader.metadata();

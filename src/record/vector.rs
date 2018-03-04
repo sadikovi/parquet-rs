@@ -89,36 +89,37 @@ impl<'a> ColumnVector<'a> {
     }
   }
 
+  pub fn current_def_level(&self) -> i16 {
+    match *self {
+      ColumnVector::BoolColumnVector(ref typed) => typed.current_def_level(),
+      ColumnVector::Int32ColumnVector(ref typed) => typed.current_def_level(),
+      ColumnVector::Int64ColumnVector(ref typed) => typed.current_def_level(),
+      ColumnVector::Int96ColumnVector(ref typed) => typed.current_def_level(),
+      ColumnVector::FloatColumnVector(ref typed) => typed.current_def_level(),
+      ColumnVector::DoubleColumnVector(ref typed) => typed.current_def_level(),
+      ColumnVector::ByteArrayColumnVector(ref typed) => typed.current_def_level(),
+      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => typed.current_def_level()
+    }
+  }
+
+  pub fn max_def_level(&self) -> i16 {
+    match *self {
+      ColumnVector::BoolColumnVector(ref typed) => typed.max_def_level(),
+      ColumnVector::Int32ColumnVector(ref typed) => typed.max_def_level(),
+      ColumnVector::Int64ColumnVector(ref typed) => typed.max_def_level(),
+      ColumnVector::Int96ColumnVector(ref typed) => typed.max_def_level(),
+      ColumnVector::FloatColumnVector(ref typed) => typed.max_def_level(),
+      ColumnVector::DoubleColumnVector(ref typed) => typed.max_def_level(),
+      ColumnVector::ByteArrayColumnVector(ref typed) => typed.max_def_level(),
+      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => typed.max_def_level()
+    }
+  }
+
   /// Returns true, if current value is null.
   /// Based on the fact that for non-null value current definition level equals to max definition
   /// level.
   pub fn is_null(&self) -> bool {
-    match *self {
-      ColumnVector::BoolColumnVector(ref typed) => {
-        typed.current_def_level() < typed.max_def_level()
-      },
-      ColumnVector::Int32ColumnVector(ref typed) => {
-        typed.current_def_level() < typed.max_def_level()
-      },
-      ColumnVector::Int64ColumnVector(ref typed) => {
-        typed.current_def_level() < typed.max_def_level()
-      },
-      ColumnVector::Int96ColumnVector(ref typed) => {
-        typed.current_def_level() < typed.max_def_level()
-      },
-      ColumnVector::FloatColumnVector(ref typed) => {
-        typed.current_def_level() < typed.max_def_level()
-      },
-      ColumnVector::DoubleColumnVector(ref typed) => {
-        typed.current_def_level() < typed.max_def_level()
-      },
-      ColumnVector::ByteArrayColumnVector(ref typed) => {
-        typed.current_def_level() < typed.max_def_level()
-      },
-      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => {
-        typed.current_def_level() < typed.max_def_level()
-      }
-    }
+    self.current_def_level() < self.max_def_level()
   }
 
   /// Updates non-null value for primitive converter.
