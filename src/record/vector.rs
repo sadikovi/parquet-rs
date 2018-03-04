@@ -25,17 +25,52 @@ use schema::types::ColumnDescPtr;
 /// High level API wrapper on column reader.
 /// Provides per-element access for each primitive column.
 pub enum ColumnVector<'a> {
-  Int32ColumnVector(TypedColumnVector<'a, Int32Type>)
+  BoolColumnVector(TypedColumnVector<'a, BoolType>),
+  Int32ColumnVector(TypedColumnVector<'a, Int32Type>),
+  Int64ColumnVector(TypedColumnVector<'a, Int64Type>),
+  Int96ColumnVector(TypedColumnVector<'a, Int96Type>),
+  FloatColumnVector(TypedColumnVector<'a, FloatType>),
+  DoubleColumnVector(TypedColumnVector<'a, DoubleType>),
+  ByteArrayColumnVector(TypedColumnVector<'a, ByteArrayType>),
+  FixedLenByteArrayColumnVector(TypedColumnVector<'a, FixedLenByteArrayType>)
 }
 
 impl<'a> ColumnVector<'a> {
   /// Creates new column vector for column reader
   pub fn new(descr: ColumnDescPtr, reader: ColumnReader<'a>, batch_size: usize) -> Self {
     match descr.physical_type() {
-      PhysicalType::INT32 => {
-        ColumnVector::Int32ColumnVector(TypedColumnVector::new(descr, batch_size, reader))
+      PhysicalType::BOOLEAN => {
+        ColumnVector::BoolColumnVector(
+          TypedColumnVector::new(descr, batch_size, reader))
       },
-      tpe => panic!("Unsupported type {}", tpe)
+      PhysicalType::INT32 => {
+        ColumnVector::Int32ColumnVector(
+          TypedColumnVector::new(descr, batch_size, reader))
+      },
+      PhysicalType::INT64 => {
+        ColumnVector::Int64ColumnVector(
+          TypedColumnVector::new(descr, batch_size, reader))
+      },
+      PhysicalType::INT96 => {
+        ColumnVector::Int96ColumnVector(
+          TypedColumnVector::new(descr, batch_size, reader))
+      },
+      PhysicalType::FLOAT => {
+        ColumnVector::FloatColumnVector(
+          TypedColumnVector::new(descr, batch_size, reader))
+      },
+      PhysicalType::DOUBLE => {
+        ColumnVector::DoubleColumnVector(
+          TypedColumnVector::new(descr, batch_size, reader))
+      },
+      PhysicalType::BYTE_ARRAY => {
+        ColumnVector::ByteArrayColumnVector(
+          TypedColumnVector::new(descr, batch_size, reader))
+      },
+      PhysicalType::FIXED_LEN_BYTE_ARRAY => {
+        ColumnVector::FixedLenByteArrayColumnVector(
+          TypedColumnVector::new(descr, batch_size, reader))
+      }
     }
   }
 
@@ -43,9 +78,14 @@ impl<'a> ColumnVector<'a> {
   /// Should be called once - either before `is_null` or `update_value`.
   pub fn consume(&mut self) -> Result<bool> {
     match *self {
-      ColumnVector::Int32ColumnVector(ref mut typed) => {
-        typed.consume()
-      }
+      ColumnVector::BoolColumnVector(ref mut typed) => typed.consume(),
+      ColumnVector::Int32ColumnVector(ref mut typed) => typed.consume(),
+      ColumnVector::Int64ColumnVector(ref mut typed) => typed.consume(),
+      ColumnVector::Int96ColumnVector(ref mut typed) => typed.consume(),
+      ColumnVector::FloatColumnVector(ref mut typed) => typed.consume(),
+      ColumnVector::DoubleColumnVector(ref mut typed) => typed.consume(),
+      ColumnVector::ByteArrayColumnVector(ref mut typed) => typed.consume(),
+      ColumnVector::FixedLenByteArrayColumnVector(ref mut typed) => typed.consume()
     }
   }
 
@@ -54,7 +94,28 @@ impl<'a> ColumnVector<'a> {
   /// level.
   pub fn is_null(&self) -> bool {
     match *self {
+      ColumnVector::BoolColumnVector(ref typed) => {
+        typed.current_def_level() < typed.max_def_level()
+      },
       ColumnVector::Int32ColumnVector(ref typed) => {
+        typed.current_def_level() < typed.max_def_level()
+      },
+      ColumnVector::Int64ColumnVector(ref typed) => {
+        typed.current_def_level() < typed.max_def_level()
+      },
+      ColumnVector::Int96ColumnVector(ref typed) => {
+        typed.current_def_level() < typed.max_def_level()
+      },
+      ColumnVector::FloatColumnVector(ref typed) => {
+        typed.current_def_level() < typed.max_def_level()
+      },
+      ColumnVector::DoubleColumnVector(ref typed) => {
+        typed.current_def_level() < typed.max_def_level()
+      },
+      ColumnVector::ByteArrayColumnVector(ref typed) => {
+        typed.current_def_level() < typed.max_def_level()
+      },
+      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => {
         typed.current_def_level() < typed.max_def_level()
       }
     }
@@ -64,23 +125,64 @@ impl<'a> ColumnVector<'a> {
   pub fn update_value(&self, converter: &mut PrimitiveConverter) {
     assert!(self.is_null(), "Value is null");
     match *self {
+      ColumnVector::BoolColumnVector(ref typed) => {
+        converter.add_boolean(*typed.current_value());
+      },
       ColumnVector::Int32ColumnVector(ref typed) => {
         converter.add_int32(*typed.current_value());
+      },
+      ColumnVector::Int64ColumnVector(ref typed) => {
+        converter.add_int64(*typed.current_value());
+      },
+      ColumnVector::Int96ColumnVector(ref typed) => {
+        converter.add_int96(typed.current_value().clone());
+      },
+      ColumnVector::FloatColumnVector(ref typed) => {
+        converter.add_float(*typed.current_value());
+      },
+      ColumnVector::DoubleColumnVector(ref typed) => {
+        converter.add_double(*typed.current_value());
+      },
+      ColumnVector::ByteArrayColumnVector(ref typed) => {
+        converter.add_byte_array(typed.current_value().clone());
+      },
+      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => {
+        converter.add_fixed_len_byte_array(typed.current_value().clone());
       }
     }
   }
 
   pub fn print_test_value(&self) {
-    let value = if self.is_null() {
-      None
+    if self.is_null() {
+      println!("  is_null: {}, value: null", self.is_null());
     } else {
       match *self {
+        ColumnVector::BoolColumnVector(ref typed) => {
+          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
+        },
         ColumnVector::Int32ColumnVector(ref typed) => {
-          Some(typed.current_value())
+          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
+        },
+        ColumnVector::Int64ColumnVector(ref typed) => {
+          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
+        },
+        ColumnVector::Int96ColumnVector(ref typed) => {
+          println!("  is_null: {}, value: {:?}", self.is_null(), typed.current_value());
+        },
+        ColumnVector::FloatColumnVector(ref typed) => {
+          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
+        },
+        ColumnVector::DoubleColumnVector(ref typed) => {
+          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
+        },
+        ColumnVector::ByteArrayColumnVector(ref typed) => {
+          println!("  is_null: {}, value: {:?}", self.is_null(), typed.current_value());
+        },
+        ColumnVector::FixedLenByteArrayColumnVector(ref typed) => {
+          println!("  is_null: {}, value: {:?}", self.is_null(), typed.current_value());
         }
       }
-    };
-    println!("  is_null: {}, value: {:?}", self.is_null(), value);
+    }
   }
 }
 
@@ -199,8 +301,9 @@ impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
       println!(" values: {:?}, def_levels: {:?}, rep_levels: {:?}", self.values, self.def_levels, self.rep_levels);
 
       // We never read values more than levels
-      if levels_read == 0 {
+      if levels_read == 0 || values_read == levels_read {
         // no definition levels read, column is required
+        // or definition levels match values, so it does not require spacing
         self.curr_triplet_index = 0;
         self.triplets_left = values_read;
       } else if values_read < levels_read {

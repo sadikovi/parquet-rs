@@ -25,7 +25,7 @@ use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::schema::printer::print_file_metadata;
 
 fn main() {
-  let path = Path::new("data/sample2.snappy.parquet");
+  let path = Path::new("data/alltypes_plain.snappy.parquet");
   let file = File::open(&path).unwrap();
   let parquet_reader = SerializedFileReader::new(file).unwrap();
   let metadata = parquet_reader.metadata();
@@ -53,7 +53,7 @@ fn main() {
       println!("- Reading column '{}' of type {}", column_path, column_type);
 
       let mut vector = ColumnVector::new(column_descr, column_reader, batch_size);
-      while let Ok(true) = vector.consume() {
+      while vector.consume().unwrap() {
         vector.print_test_value();
       }
     }
