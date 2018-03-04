@@ -34,6 +34,7 @@ use compression::{Codec, create_codec};
 use record::api::{GroupConverter, RecordMaterializer};
 use record::vector::ColumnVector;
 use record::reader::RecordReader;
+use util::io::FileHandle;
 use util::memory::ByteBufferPtr;
 
 // ----------------------------------------------------------------------
@@ -255,12 +256,11 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
     if col.has_dictionary_page() {
       col_start = col.dictionary_page_offset().unwrap();
     }
-    let col_length = col.compressed_size() as u64;
-    let f = self.buf.get_ref().try_clone()?;
-    let mut buf = BufReader::new(f);
-    let _ = buf.seek(SeekFrom::Start(col_start as u64));
+    let col_length = col.compressed_size();
+    let fh = FileHandle::new(
+      self.buf.get_ref(), col_start as usize, col_length as usize);
     let page_reader = SerializedPageReader::new(
-      buf.take(col_length).into_inner(), col.num_values(), col.compression())?;
+      fh, col.num_values(), col.compression())?;
     Ok(Box::new(page_reader))
   }
 
@@ -320,7 +320,7 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
 pub struct SerializedPageReader {
   // The buffer which contains exactly the bytes for the column trunk
   // to be read by this page reader
-  buf: BufReader<File>,
+  buf: FileHandle,
 
   // The compression codec for this column chunk. Only set for
   // non-PLAIN codec.
@@ -334,12 +334,19 @@ pub struct SerializedPageReader {
 }
 
 impl SerializedPageReader {
-  pub fn new(buf: BufReader<File>, total_num_values: i64,
-             compression: Compression) -> Result<Self> {
+  pub fn new(
+    buf: FileHandle,
+    total_num_values: i64,
+    compression: Compression
+  ) -> Result<Self> {
     let decompressor = create_codec(compression)?;
     let result =
-      Self { buf: buf, total_num_values: total_num_values, seen_num_values: 0,
-             decompressor: decompressor };
+      Self {
+        buf: buf,
+        total_num_values: total_num_values,
+        seen_num_values: 0,
+        decompressor: decompressor
+      };
     Ok(result)
   }
 
