@@ -16,7 +16,7 @@
 // under the License.
 
 use record::api::PrimitiveConverter;
-use basic::{Repetition, Type as PhysicalType};
+use basic::{Type as PhysicalType};
 use column::reader::{ColumnReader, ColumnReaderImpl, get_typed_column_reader};
 use data_type::*;
 use errors::{Result, ParquetError};
@@ -89,6 +89,7 @@ impl<'a> ColumnVector<'a> {
     }
   }
 
+  /// Returns current definition level for a leaf vector
   pub fn current_def_level(&self) -> i16 {
     match *self {
       ColumnVector::BoolColumnVector(ref typed) => typed.current_def_level(),
@@ -102,6 +103,7 @@ impl<'a> ColumnVector<'a> {
     }
   }
 
+  /// Returns max definition level for a leaf vector
   pub fn max_def_level(&self) -> i16 {
     match *self {
       ColumnVector::BoolColumnVector(ref typed) => typed.max_def_level(),
@@ -116,8 +118,8 @@ impl<'a> ColumnVector<'a> {
   }
 
   /// Returns true, if current value is null.
-  /// Based on the fact that for non-null value current definition level equals to max definition
-  /// level.
+  /// Based on the fact that for non-null value current definition level
+  /// equals to max definition level.
   pub fn is_null(&self) -> bool {
     self.current_def_level() < self.max_def_level()
   }
@@ -153,6 +155,7 @@ impl<'a> ColumnVector<'a> {
     }
   }
 
+  /// Test method to print values being traversed.
   pub fn print_test_value(&self) {
     if self.is_null() {
       println!("  is_null: {}, value: null", self.is_null());
@@ -193,7 +196,6 @@ pub struct TypedColumnVector<'a, T: DataType> {
   reader: ColumnReaderImpl<'a, T>,
   batch_size: usize,
   // type properties
-  is_required: bool,
   max_def_level: i16,
   max_rep_level: i16,
   // values and levels
@@ -212,17 +214,15 @@ impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
   fn new(descr: ColumnDescPtr, batch_size: usize, column_reader: ColumnReader<'a>) -> Self {
     assert!(batch_size > 0, "Expected positive batch size, found: {}", batch_size);
 
-    let is_required = descr.repetition() == Repetition::REQUIRED;
     let max_def_level = descr.max_def_level();
     let max_rep_level = descr.max_rep_level();
 
-    let def_levels = if is_required { None } else { Some(vec![0; batch_size]) };
-    let rep_levels = None; // TODO: handle repeated columns
+    let def_levels = if max_def_level == 0 { None } else { Some(vec![0; batch_size]) };
+    let rep_levels = if max_rep_level == 0 { None } else { Some(vec![0; batch_size]) };
 
     Self {
       reader: get_typed_column_reader(column_reader),
       batch_size: batch_size,
-      is_required: is_required,
       max_def_level: max_def_level,
       max_rep_level: max_rep_level,
       values: vec![T::T::default(); batch_size],
