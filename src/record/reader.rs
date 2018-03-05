@@ -73,7 +73,7 @@ impl<'a> RecordReader<'a> {
     self.record_mat.root_converter().start();
     let cols = &self.column_vectors[..];
     for col in cols {
-      println!("    * traverse column, def level: {}", col.current_def_level());
+      col.print_test_value();
     }
     self.record_mat.root_converter().end();
     self.record_mat.consume_current_record();
