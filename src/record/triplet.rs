@@ -182,7 +182,7 @@ impl<'a> TripletIter<'a> {
         Row::new_int64(typed.logical_type(), *typed.current_value())
       },
       TripletIter::Int96TripletIter(ref typed) => {
-        Row::new_int96(typed.logical_type(), typed.current_value().clone())
+        Row::new_int96(typed.current_value().clone())
       },
       TripletIter::FloatTripletIter(ref typed) => {
         Row::new_float(*typed.current_value())

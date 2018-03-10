@@ -22,6 +22,7 @@ use data_type::{ByteArray, Int96};
 
 #[derive(Clone, Debug)]
 pub enum Row {
+  // Primitive types
   Null,
   Bool(bool),
   Byte(i8),
@@ -31,9 +32,11 @@ pub enum Row {
   Float(f32),
   Double(f64),
   Str(String),
-  Bytes(ByteArray), // should we change to Vec<u8>?
-  Group(HashMap<String, Row>),
-  List(Vec<Row>),
+  Bytes(ByteArray),
+  Timestamp(u64), // timestamp with milliseconds
+  // Complex types
+  Group(HashMap<String, Row>), // struct type where key is a name of the child element
+  List(Vec<Row>), // list of elements
   Map(Vec<(Row, Row)>) // list of key-value pairs
 }
 
@@ -58,8 +61,19 @@ impl Row {
     }
   }
 
-  pub fn new_int96(_logical_type: LogicalType, _value: Int96) -> Self {
-    unimplemented!();
+  pub fn new_int96(value: Int96) -> Self {
+    // Converts nanosecond timestamps stored as INT96 into internal milliseconds
+
+    let julian_to_unix_epoch_days: u64 = 2_440_588;
+    let milli_seconds_in_a_day: u64 = 86_400_000;
+    let nano_seconds_in_a_day: u64 = milli_seconds_in_a_day * 1_000_000;
+
+    let days_since_epoch = value.data()[2] as u64 - julian_to_unix_epoch_days;
+    let nanoseconds: u64 = ((value.data()[1] as u64) << 32) + value.data()[0] as u64;
+    let nanos = days_since_epoch * nano_seconds_in_a_day + nanoseconds;
+    let millis = nanos / 1_000_000;
+
+    Row::Timestamp(millis)
   }
 
   pub fn new_float(value: f32) -> Self {
@@ -103,6 +117,7 @@ impl fmt::Display for Row {
       Row::Double(value) => write!(f, "{:?}", value),
       Row::Str(ref value) => write!(f, "\"{}\"", value),
       Row::Bytes(ref value) => write!(f, "{:?}", value.data()),
+      Row::Timestamp(value) => write!(f, "{}", value),
       Row::Group(ref fields) => {
         // Sort keys in ascending order for consistent display
         let mut entries: Vec<(&String, &Row)> = fields.iter().collect();
