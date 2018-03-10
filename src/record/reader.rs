@@ -136,9 +136,10 @@ impl<'a> Reader<'a> {
           if Self::is_element_type(&repeated_field) {
             let reader = Self::reader_tree(repeated_field.clone(), &mut path,
               curr_def_level, curr_rep_level, paths, row_group_reader);
-
+            // TODO: check if we need to subtract 1 from def and rep levels, when
+            // building repeated reader
             Reader::RepeatedReader(
-              field, curr_def_level - 1, curr_rep_level - 1, Box::new(reader))
+              field, curr_def_level, curr_rep_level, Box::new(reader))
           } else {
             let child_field = repeated_field.get_fields()[0].clone();
 
@@ -179,7 +180,7 @@ impl<'a> Reader<'a> {
 
           path.pop();
 
-          Reader::KeyValueReader(field, curr_def_level - 1, curr_rep_level - 1,
+          Reader::KeyValueReader(field, curr_def_level, curr_rep_level,
             Box::new(key_reader), Box::new(value_reader))
         },
         // Group types (structs)
