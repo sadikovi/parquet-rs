@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, BufReader, Seek, SeekFrom};
 use std::rc::Rc;
@@ -27,13 +26,12 @@ use byteorder::{LittleEndian, ByteOrder};
 use thrift::protocol::TCompactInputProtocol;
 use parquet_thrift::parquet::FileMetaData as TFileMetaData;
 use parquet_thrift::parquet::{PageType, PageHeader};
-use schema::types::{self, ColumnPath, Type as SchemaType, SchemaDescriptor};
+use schema::types::{self, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
 use record::api::RecordMaterializer;
-use record::vector::ColumnVector;
-use record::reader::RecordReader;
+use record::values::ValueReader;
 use util::io::FileHandle;
 use util::memory::ByteBufferPtr;
 
@@ -272,27 +270,8 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
   }
 
   fn read_data(&self, projection: Rc<SchemaType>, rm: &mut Box<RecordMaterializer>) {
-    // prepare map of column paths for pruning
-    let mut paths: HashMap<&ColumnPath, usize> = HashMap::new();
-    for col_index in 0..self.num_columns() {
-      let col_meta = self.metadata().column(col_index);
-      let col_path = col_meta.column_path();
-      paths.insert(col_path, col_index);
-    }
-
-    let mut column_vectors: Vec<ColumnVector> = Vec::new();
     let proj_descr = &SchemaDescriptor::new(projection);
-    // prune column paths that are not used in projection
-    for col_index in 0..proj_descr.num_columns() {
-      let column_desc = proj_descr.column(col_index);
-      // return an error instead of unwrap
-      let orig_index = *paths.get(column_desc.path()).unwrap();
-      let column_reader = self.get_column_reader(orig_index).unwrap();
-      let mut column_vector = ColumnVector::new(column_desc, column_reader, 4);
-      column_vectors.push(column_vector);
-    }
-
-    let mut reader = RecordReader::new(proj_descr, rm, column_vectors);
+    let mut reader = ValueReader::new(proj_descr, self);
     reader.read_records(self.metadata().num_rows() as usize);
   }
 }

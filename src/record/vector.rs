@@ -298,8 +298,8 @@ impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
         return Ok(false);
       }
 
-      println!("  ~ values_read: {}, levels_read: {}", values_read, levels_read);
-      println!("  ~ values: {:?}, def_levels: {:?}, rep_levels: {:?}", self.values, self.def_levels, self.rep_levels);
+      // println!("  ~ values_read: {}, levels_read: {}", values_read, levels_read);
+      // println!("  ~ values: {:?}, def_levels: {:?}, rep_levels: {:?}", self.values, self.def_levels, self.rep_levels);
 
       // We never read values more than levels
       if levels_read == 0 || values_read == levels_read {
