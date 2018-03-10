@@ -32,7 +32,8 @@ pub enum Row {
   Double(f64),
   Str(String),
   Bytes(ByteArray), // should we change to Vec<u8>?
-  Group(HashMap<String, Row>)
+  Group(HashMap<String, Row>),
+  List(Vec<Row>)
 }
 
 impl Row {
@@ -110,6 +111,16 @@ impl fmt::Display for Row {
           write!(f, "{}: ", key)?;
           value.fmt(f)?;
           if i < entries.len() - 1 {
+            write!(f, ", ")?;
+          }
+        }
+        write!(f, "]")
+      },
+      Row::List(ref fields) => {
+        write!(f, "[")?;
+        for (i, field) in fields.iter().enumerate() {
+          field.fmt(f)?;
+          if i < fields.len() - 1 {
             write!(f, ", ")?;
           }
         }
