@@ -53,7 +53,8 @@ pub enum ValueReader<'a> {
   PrimitiveReader(TypePtr, ColumnVector<'a>),
   OptionReader(i16, Box<ValueReader<'a>>),
   GroupReader(Option<TypePtr>, Repetition, i16, Vec<ValueReader<'a>>),
-  RepeatedReader(TypePtr, i16, i16, Box<ValueReader<'a>>)
+  RepeatedReader(TypePtr, i16, i16, Box<ValueReader<'a>>),
+  KeyValueReader(TypePtr, i16, i16, Box<ValueReader<'a>>, Box<ValueReader<'a>>)
 }
 
 impl<'a> ValueReader<'a> {
@@ -77,6 +78,8 @@ impl<'a> ValueReader<'a> {
       readers.push(reader);
     }
 
+    // Return group reader for message type, we mark it as always required with
+    // definition level 0
     ValueReader::GroupReader(None, Repetition::REQUIRED, 0, readers)
   }
 
@@ -137,12 +140,12 @@ impl<'a> ValueReader<'a> {
               field, curr_def_level - 1, curr_rep_level - 1, Box::new(reader))
           } else {
             let child_field = repeated_field.get_fields()[0].clone();
-            assert_eq!(child_field.get_basic_info().repetition(), Repetition::OPTIONAL,
-              "Invalid list type: {:?}", field);
 
             path.push(String::from(repeated_field.name()));
+
             let reader = Self::reader_tree(child_field, &mut path,
               curr_def_level + 1, curr_rep_level, paths, row_group_reader);
+
             path.pop();
 
             ValueReader::RepeatedReader(
@@ -151,7 +154,32 @@ impl<'a> ValueReader<'a> {
         },
         // Map types (key-value pairs)
         LogicalType::MAP | LogicalType:: MAP_KEY_VALUE => {
-          unimplemented!();
+          assert_eq!(field.get_fields().len(), 1, "Invalid map type: {:?}", field);
+          assert!(!field.get_fields()[0].is_primitive(), "Invalid map type: {:?}", field);
+
+          let key_value_type = field.get_fields()[0].clone();
+          assert_eq!(key_value_type.get_basic_info().repetition(), Repetition::REPEATED,
+            "Invalid map type: {:?}", field);
+          assert_eq!(key_value_type.get_fields().len(), 2,
+            "Invalid map type: {:?}", field);
+
+          path.push(String::from(key_value_type.name()));
+
+          let key_type = &key_value_type.get_fields()[0];
+          // TODO: not sure if key can only be primitive, check this.
+          assert!(key_type.is_primitive(),
+            "Map key type is expected to be a primitive type, but found {:?}", key_type);
+          let key_reader = Self::reader_tree(key_type.clone(), &mut path,
+            curr_def_level + 1, curr_rep_level, paths, row_group_reader);
+
+          let value_type = &key_value_type.get_fields()[1];
+          let value_reader = Self::reader_tree(value_type.clone(), &mut path,
+            curr_def_level + 1, curr_rep_level, paths, row_group_reader);
+
+          path.pop();
+
+          ValueReader::KeyValueReader(field, curr_def_level - 1, curr_rep_level - 1,
+            Box::new(key_reader), Box::new(value_reader))
         },
         // Group types (structs)
         _ => {
@@ -272,6 +300,29 @@ impl<'a> ValueReader<'a> {
         }
         Row::List(elements)
       },
+      ValueReader::KeyValueReader(_, def_level, rep_level,
+          ref mut keys, ref mut values) => {
+
+        let mut pairs = Vec::new();
+        loop {
+          if keys.current_def_level() > def_level {
+            pairs.push((keys.read(), values.read()));
+          } else {
+            keys.advance_columns();
+            values.advance_columns();
+            // if the current definition level is equal to the definition level of this
+            // repeated type, then the result is an empty list and the repetition level
+            // will always be <= rl.
+            break;
+          }
+
+          if keys.current_rep_level() <= rep_level {
+            break;
+          }
+        }
+
+        Row::Map(pairs)
+      }
     }
   }
 
@@ -284,6 +335,7 @@ impl<'a> ValueReader<'a> {
         &None => panic!("Field is None for group reader"),
       },
       ValueReader::RepeatedReader(ref field, _, _, _) => field.name(),
+      ValueReader::KeyValueReader(ref field, _, _, _, _) => field.name(),
     }
   }
 
@@ -295,6 +347,7 @@ impl<'a> ValueReader<'a> {
         readers.first().unwrap().current_def_level()
       },
       ValueReader::RepeatedReader(_, _, _, ref reader) => reader.current_def_level(),
+      ValueReader::KeyValueReader(_, _, _, ref keys, _) => keys.current_def_level(),
     }
   }
 
@@ -306,6 +359,7 @@ impl<'a> ValueReader<'a> {
         readers.first().unwrap().current_rep_level()
       },
       ValueReader::RepeatedReader(_, _, _, ref reader) => reader.current_rep_level(),
+      ValueReader::KeyValueReader(_, _, _, ref keys, _) => keys.current_rep_level(),
     }
   }
 
@@ -324,6 +378,10 @@ impl<'a> ValueReader<'a> {
       },
       ValueReader::RepeatedReader(_, _, _, ref mut reader) => {
         reader.advance_columns();
+      },
+      ValueReader::KeyValueReader(_, _, _, ref mut keys, ref mut values) => {
+        keys.advance_columns();
+        values.advance_columns();
       },
     }
   }

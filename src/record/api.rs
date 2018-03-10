@@ -33,7 +33,8 @@ pub enum Row {
   Str(String),
   Bytes(ByteArray), // should we change to Vec<u8>?
   Group(HashMap<String, Row>),
-  List(Vec<Row>)
+  List(Vec<Row>),
+  Map(Vec<(Row, Row)>) // list of key-value pairs
 }
 
 impl Row {
@@ -125,6 +126,18 @@ impl fmt::Display for Row {
           }
         }
         write!(f, "]")
+      },
+      Row::Map(ref pairs) => {
+        write!(f, "{{")?;
+        for (i, &(ref key, ref value)) in pairs.iter().enumerate() {
+          key.fmt(f)?;
+          write!(f, ": ")?;
+          value.fmt(f)?;
+          if i < pairs.len() - 1 {
+            write!(f, ", ")?;
+          }
+        }
+        write!(f, "}}")
       }
     }
   }

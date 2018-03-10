@@ -8,7 +8,7 @@ use parquet::schema::printer::{print_file_metadata, print_schema};
 use parquet::schema::parser::parse_message_type;
 
 fn main() {
-  let path = Path::new("data/sample2.snappy.parquet");
+  let path = Path::new("data/sample4.snappy.parquet");
   let file = File::open(&path).unwrap();
   let parquet_reader = SerializedFileReader::new(file).unwrap();
   let metadata = parquet_reader.metadata();
