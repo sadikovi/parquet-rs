@@ -89,6 +89,22 @@ impl<'a> TripletIter<'a> {
     }
   }
 
+  /// Provides check on values/levels left without invoking the underlying column reader.
+  /// Returns true if more values/levels exist, false otherwise.
+  /// It is always in sync with `consume` method.
+  pub fn has_next(&self) -> bool {
+    match *self {
+      TripletIter::BoolTripletIter(ref typed) => typed.has_next(),
+      TripletIter::Int32TripletIter(ref typed) => typed.has_next(),
+      TripletIter::Int64TripletIter(ref typed) => typed.has_next(),
+      TripletIter::Int96TripletIter(ref typed) => typed.has_next(),
+      TripletIter::FloatTripletIter(ref typed) => typed.has_next(),
+      TripletIter::DoubleTripletIter(ref typed) => typed.has_next(),
+      TripletIter::ByteArrayTripletIter(ref typed) => typed.has_next(),
+      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.has_next()
+    }
+  }
+
   /// Returns current definition level for a leaf vector
   pub fn current_def_level(&self) -> i16 {
     match *self {
@@ -237,7 +253,9 @@ pub struct TypedTripletIter<'a, T: DataType> {
   // current index for the triplet (value, def, rep)
   curr_triplet_index: usize,
   // how many triplets are left before we need to buffer
-  triplets_left: usize
+  triplets_left: usize,
+  // helper flag to quickly check if we have more values/levels to read
+  has_next: bool
 }
 
 impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
@@ -263,7 +281,8 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
       def_levels: def_levels,
       rep_levels: rep_levels,
       curr_triplet_index: 0,
-      triplets_left: 0
+      triplets_left: 0,
+      has_next: false
     }
   }
 
@@ -339,6 +358,7 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
 
       // No more values or levels to read
       if values_read == 0 && levels_read == 0 {
+        self.has_next = false;
         return Ok(false);
       }
 
@@ -368,6 +388,13 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
       }
     }
 
+    self.has_next = true;
     Ok(true)
+  }
+
+  /// Quick check if iterator has more values/levels to read.
+  /// It is updated as a result of `consume` method, so they are synchronized.
+  fn has_next(&self) -> bool {
+    self.has_next
   }
 }

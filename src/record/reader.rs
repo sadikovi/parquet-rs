@@ -136,8 +136,7 @@ impl<'a> Reader<'a> {
           if Self::is_element_type(&repeated_field) {
             let reader = Self::reader_tree(repeated_field.clone(), &mut path,
               curr_def_level, curr_rep_level, paths, row_group_reader);
-            // TODO: check if we need to subtract 1 from def and rep levels, when
-            // building repeated reader
+
             Reader::RepeatedReader(
               field, curr_def_level, curr_rep_level, Box::new(reader))
           } else {
@@ -273,7 +272,8 @@ impl<'a> Reader<'a> {
       Reader::GroupReader(_, repetition, def_level, ref mut readers) => {
         let mut fields = HashMap::new();
         for reader in readers {
-          if repetition != Repetition::OPTIONAL || reader.current_def_level() > def_level {
+          if repetition != Repetition::OPTIONAL ||
+              reader.current_def_level() > def_level {
             fields.insert(String::from(reader.field_name()), reader.read());
           } else {
             reader.advance_columns();
@@ -296,7 +296,9 @@ impl<'a> Reader<'a> {
             break;
           }
 
-          if reader.current_rep_level() <= rep_level {
+          // this covers case when we are out of repetition levels and should close the
+          // group, or there are no values left to buffer.
+          if !reader.has_next() || reader.current_rep_level() <= rep_level {
             break;
           }
         }
@@ -318,7 +320,9 @@ impl<'a> Reader<'a> {
             break;
           }
 
-          if keys.current_rep_level() <= rep_level {
+          // this covers case when we are out of repetition levels and should close the
+          // group, or there are no values left to buffer.
+          if !keys.has_next() || keys.current_rep_level() <= rep_level {
             break;
           }
         }
@@ -338,6 +342,16 @@ impl<'a> Reader<'a> {
       },
       Reader::RepeatedReader(ref field, _, _, _) => field.name(),
       Reader::KeyValueReader(ref field, _, _, _, _) => field.name(),
+    }
+  }
+
+  fn has_next(&self) -> bool {
+    match *self {
+      Reader::PrimitiveReader(_, ref column) => column.has_next(),
+      Reader::OptionReader(_, ref reader) => reader.has_next(),
+      Reader::GroupReader(_, _, _, ref readers) => readers.first().unwrap().has_next(),
+      Reader::RepeatedReader(_, _, _, ref reader) => reader.has_next(),
+      Reader::KeyValueReader(_, _, _, ref keys, _) => keys.has_next(),
     }
   }
 
