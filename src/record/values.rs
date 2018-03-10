@@ -73,6 +73,9 @@ impl<'a> ValueReader<'a> {
       _ => { }
     }
 
+    // TODO: add support for repeated fields, e.g. list or map
+    assert!(repetition != Repetition::REPEATED, "REPEATED fields are not supported");
+
     path.push(String::from(field.name()));
     let reader = if field.is_primitive() {
       let col_path = ColumnPath::new(path.to_vec());
@@ -82,7 +85,6 @@ impl<'a> ValueReader<'a> {
       let col_vector = ColumnVector::new(col_descr, col_reader, 4);
       ValueReader::PrimitiveReader(col_vector)
     } else {
-      // TODO: distinguish between repeated fields and struct fields
       let mut readers = Vec::new();
       for child in field.get_fields() {
         let reader = Self::reader_tree(child, &mut path,
@@ -159,6 +161,7 @@ impl<'a> ValueReader<'a> {
 
   /// Reads records using current reader's record materializer.
   /// Reads at most `num_records` rows.
+  /// TODO: Change to return an iterator
   pub fn read_records(&mut self, num_records: usize) {
     self.advance_columns();
     for i in 0..num_records {

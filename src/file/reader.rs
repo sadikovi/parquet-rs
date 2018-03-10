@@ -30,7 +30,6 @@ use schema::types::{self, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
-use record::api::RecordMaterializer;
 use record::values::ValueReader;
 use util::io::FileHandle;
 use util::memory::ByteBufferPtr;
@@ -54,7 +53,7 @@ pub trait FileReader {
   fn get_row_group<'a>(&'a self, i: usize) -> Result<Box<RowGroupReader<'a> + 'a>>;
 
   /// Method to read all data, e.g. from the file
-  fn read_data(&self, projection: SchemaType, rm: &mut Box<RecordMaterializer>);
+  fn read_data(&self, projection: SchemaType);
 }
 
 /// Parquet row group reader API. With this, user can get metadata information about the
@@ -75,7 +74,7 @@ pub trait RowGroupReader<'a> {
   fn get_column_reader(&self, i: usize) -> Result<ColumnReader>;
 
   /// Read all data from row group
-  fn read_data(&self, projection: Rc<SchemaType>, rm: &mut Box<RecordMaterializer>);
+  fn read_data(&self, projection: Rc<SchemaType>);
 }
 
 
@@ -185,9 +184,8 @@ impl FileReader for SerializedFileReader {
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
 
-  // TODO: add number of records to read as option - if provided we return at most that value,
-  // otherwise, read all records.
-  fn read_data(&self, mut projection: SchemaType, rm: &mut Box<RecordMaterializer>) {
+  // TODO: return iterator
+  fn read_data(&self, projection: SchemaType) {
     // check if projection is part of file schema
     let root_schema = self.metadata().file_metadata().schema_descr().root_schema();
     if !root_schema.check_contains(&projection) {
@@ -195,12 +193,11 @@ impl FileReader for SerializedFileReader {
       panic!("Root schema does not contain projection");
     }
 
-    rm.init(&mut projection);
     println!("* reading file");
     let proj = Rc::new(projection);
     for i in 0..self.num_row_groups() {
       println!("* reading row group {}", i);
-      self.get_row_group(i).unwrap().read_data(proj.clone(), rm);
+      self.get_row_group(i).unwrap().read_data(proj.clone());
     }
   }
 }
@@ -269,7 +266,7 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
     Ok(col_reader)
   }
 
-  fn read_data(&self, projection: Rc<SchemaType>, rm: &mut Box<RecordMaterializer>) {
+  fn read_data(&self, projection: Rc<SchemaType>) {
     let proj_descr = &SchemaDescriptor::new(projection);
     let mut reader = ValueReader::new(proj_descr, self);
     reader.read_records(self.metadata().num_rows() as usize);

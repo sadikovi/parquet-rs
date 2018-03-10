@@ -138,6 +138,6 @@ fn main() {
   print_schema(&mut std::io::stdout(), &schema);
   println!();
 
-  let mut rm = Box::new(MyRecord::new()) as Box<RecordMaterializer>;
-  parquet_reader.read_data(schema, &mut rm);
+  let mut _rm = Box::new(MyRecord::new()) as Box<RecordMaterializer>;
+  parquet_reader.read_data(schema);
 }
