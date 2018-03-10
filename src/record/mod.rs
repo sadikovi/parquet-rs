@@ -17,4 +17,4 @@
 
 pub mod api;
 pub mod reader;
-pub mod triplet;
+mod triplet;
