@@ -19,12 +19,13 @@ use std::collections::HashMap;
 use basic::Repetition;
 use file::reader::RowGroupReader;
 use schema::types::{ColumnPath, SchemaDescriptor, Type};
+use record::api::Row;
 use record::vector::ColumnVector;
 
 pub enum ValueReader<'a> {
-  PrimitiveReader(ColumnVector<'a>),
+  PrimitiveReader(&'a str, ColumnVector<'a>),
   OptionReader(i16, Box<ValueReader<'a>>),
-  GroupReader(Repetition, i16, Vec<ValueReader<'a>>)
+  GroupReader(&'a str, Repetition, i16, Vec<ValueReader<'a>>)
 }
 
 impl<'a> ValueReader<'a> {
@@ -48,11 +49,11 @@ impl<'a> ValueReader<'a> {
     }
 
     // Message type is always required with 0 definition level
-    ValueReader::GroupReader(Repetition::REQUIRED, 0, readers)
+    ValueReader::GroupReader("", Repetition::REQUIRED, 0, readers)
   }
 
   fn reader_tree(
-    field: &Type,
+    field: &'a Type,
     mut path: &mut Vec<String>,
     mut curr_def_level: i16,
     mut curr_rep_level: i16,
@@ -83,7 +84,7 @@ impl<'a> ValueReader<'a> {
       let col_descr = row_group_reader.metadata().column(orig_index).column_descr_ptr();
       let col_reader = row_group_reader.get_column_reader(orig_index).unwrap();
       let col_vector = ColumnVector::new(col_descr, col_reader, 4);
-      ValueReader::PrimitiveReader(col_vector)
+      ValueReader::PrimitiveReader(field.name(), col_vector)
     } else {
       let mut readers = Vec::new();
       for child in field.get_fields() {
@@ -91,7 +92,7 @@ impl<'a> ValueReader<'a> {
           curr_def_level, curr_rep_level, paths, row_group_reader);
         readers.push(reader);
       }
-      ValueReader::GroupReader(repetition, curr_def_level, readers)
+      ValueReader::GroupReader(field.name(), repetition, curr_def_level, readers)
     };
     path.pop();
 
@@ -108,50 +109,63 @@ impl<'a> ValueReader<'a> {
     }
   }
 
-  fn read(&mut self) {
+  fn read(&mut self) -> Row {
     match *self {
-      ValueReader::PrimitiveReader(ref mut column) => {
-        column.print_test_value();
+      ValueReader::PrimitiveReader(_, ref mut column) => {
+        let value = column.current_value();
         column.consume().unwrap();
+        value
       },
       ValueReader::OptionReader(def_level, ref mut reader) => {
-        if reader.column_def_level() > def_level {
-          reader.read();
+        if reader.current_def_level() > def_level {
+          reader.read()
         } else {
           reader.advance_columns();
+          Row::Null
         }
       },
-      ValueReader::GroupReader(repetition, def_level, ref mut readers) => {
+      ValueReader::GroupReader(_, repetition, def_level, ref mut readers) => {
+        let mut fields = HashMap::new();
         for reader in readers {
-          if repetition != Repetition::OPTIONAL || reader.column_def_level() > def_level {
-            reader.read();
+          if repetition != Repetition::OPTIONAL || reader.current_def_level() > def_level {
+            fields.insert(String::from(reader.field_name()), reader.read());
           } else {
             reader.advance_columns();
+            fields.insert(String::from(reader.field_name()), Row::Null);
           }
         }
+        Row::Group(fields)
       }
     }
   }
 
-  fn column_def_level(&self) -> i16 {
+  fn field_name(&self) -> &str {
     match *self {
-      ValueReader::PrimitiveReader(ref column) => column.current_def_level(),
-      ValueReader::OptionReader(_, ref reader) => reader.column_def_level(),
-      ValueReader::GroupReader(_, _, ref readers) => {
-        readers.first().unwrap().column_def_level()
+      ValueReader::PrimitiveReader(field_name, _) => field_name,
+      ValueReader::OptionReader(_, ref reader) => reader.field_name(),
+      ValueReader::GroupReader(field_name, _, _, _) => field_name
+    }
+  }
+
+  fn current_def_level(&self) -> i16 {
+    match *self {
+      ValueReader::PrimitiveReader(_, ref column) => column.current_def_level(),
+      ValueReader::OptionReader(_, ref reader) => reader.current_def_level(),
+      ValueReader::GroupReader(_, _, _, ref readers) => {
+        readers.first().unwrap().current_def_level()
       },
     }
   }
 
   fn advance_columns(&mut self) {
     match *self {
-      ValueReader::PrimitiveReader(ref mut column) => {
+      ValueReader::PrimitiveReader(_, ref mut column) => {
         column.consume().unwrap();
       },
       ValueReader::OptionReader(_, ref mut reader) => {
         reader.advance_columns();
       },
-      ValueReader::GroupReader(_, _, ref mut readers) => {
+      ValueReader::GroupReader(_, _, _, ref mut readers) => {
         for reader in readers {
           reader.advance_columns();
         }
@@ -165,8 +179,7 @@ impl<'a> ValueReader<'a> {
   pub fn read_records(&mut self, num_records: usize) {
     self.advance_columns();
     for i in 0..num_records {
-      println!("--- record {} ---", i);
-      self.read();
+      println!("record {} - {}", i, self.read());
     }
   }
 }

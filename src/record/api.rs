@@ -101,7 +101,20 @@ impl fmt::Display for Row {
       Row::Double(value) => write!(f, "{}", value),
       Row::Str(ref value) => write!(f, "{}", value),
       Row::Bytes(ref value) => write!(f, "{:?}", value.data()),
-      Row::Group(ref map) => write!(f, "{:?}", map)
+      Row::Group(ref fields) => {
+        // Sort keys in ascending order for consistent display
+        let mut entries: Vec<(&String, &Row)> = fields.iter().collect();
+        entries.sort_unstable_by_key(|&(key, _value)| key);
+        write!(f, "[")?;
+        for (i, &(key, value)) in entries.iter().enumerate() {
+          write!(f, "{}: ", key)?;
+          value.fmt(f)?;
+          if i < entries.len() - 1 {
+            write!(f, ", ")?;
+          }
+        }
+        write!(f, "]")
+      }
     }
   }
 }
