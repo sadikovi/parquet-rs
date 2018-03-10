@@ -62,7 +62,6 @@ impl<'a> ValueReader<'a> {
     assert!(field.get_basic_info().has_repetition());
     // Update current definition and repetition levels for this type
     let repetition = field.get_basic_info().repetition();
-    println
     match repetition {
       Repetition::OPTIONAL => {
         curr_def_level += 1;
