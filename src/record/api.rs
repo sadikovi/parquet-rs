@@ -101,7 +101,7 @@ impl fmt::Display for Row {
       Row::Long(value) => write!(f, "{}", value),
       Row::Float(value) => write!(f, "{}", value),
       Row::Double(value) => write!(f, "{}", value),
-      Row::Str(ref value) => write!(f, "{}", value),
+      Row::Str(ref value) => write!(f, "\"{}\"", value),
       Row::Bytes(ref value) => write!(f, "{:?}", value.data()),
       Row::Group(ref fields) => {
         // Sort keys in ascending order for consistent display
