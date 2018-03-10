@@ -18,19 +18,46 @@
 use std::collections::HashMap;
 use basic::Repetition;
 use file::reader::RowGroupReader;
-use schema::types::{ColumnPath, SchemaDescriptor, Type};
+use schema::types::{ColumnPath, SchemaDescriptor, TypePtr};
 use record::api::Row;
 use record::vector::ColumnVector;
 
+/// Iterator of Rows
+pub struct RowIter<'a> {
+  root_reader: ValueReader<'a>,
+  records_left: usize
+}
+
+impl<'a> RowIter<'a> {
+  fn new(mut root_reader: ValueReader<'a>, num_records: usize) -> Self {
+    // Prepare root reader by advancing all column vectors
+    root_reader.advance_columns();
+    Self { root_reader: root_reader, records_left: num_records }
+  }
+}
+
+impl<'a> Iterator for RowIter<'a> {
+  type Item = Row;
+
+  fn next(&mut self) -> Option<Row> {
+    if self.records_left > 0 {
+      self.records_left -= 1;
+      Some(self.root_reader.read())
+    } else {
+      None
+    }
+  }
+}
+
 pub enum ValueReader<'a> {
-  PrimitiveReader(&'a str, ColumnVector<'a>),
+  PrimitiveReader(TypePtr, ColumnVector<'a>),
   OptionReader(i16, Box<ValueReader<'a>>),
-  GroupReader(&'a str, Repetition, i16, Vec<ValueReader<'a>>)
+  GroupReader(Option<TypePtr>, Repetition, i16, Vec<ValueReader<'a>>)
 }
 
 impl<'a> ValueReader<'a> {
   pub fn new(
-    descr: &'a SchemaDescriptor,
+    descr: SchemaDescriptor,
     row_group_reader: &'a RowGroupReader
   ) -> Self {
     // prepare map of column paths for pruning
@@ -44,16 +71,24 @@ impl<'a> ValueReader<'a> {
     let mut readers = Vec::new();
     let mut path = Vec::new();
     for field in descr.root_schema().get_fields() {
-      let reader = Self::reader_tree(field, &mut path, 0, 0, &paths, row_group_reader);
+      let reader = Self::reader_tree(
+        field.clone(), &mut path, 0, 0, &paths, row_group_reader);
       readers.push(reader);
     }
 
-    // Message type is always required with 0 definition level
-    ValueReader::GroupReader("", Repetition::REQUIRED, 0, readers)
+    ValueReader::GroupReader(None, Repetition::REQUIRED, 0, readers)
+  }
+
+  pub fn row_iter(
+    descr: SchemaDescriptor,
+    row_group_reader: &'a RowGroupReader
+  ) -> RowIter<'a> {
+    let num_records = row_group_reader.metadata().num_rows() as usize;
+    RowIter::new(Self::new(descr, row_group_reader), num_records)
   }
 
   fn reader_tree(
-    field: &'a Type,
+    field: TypePtr,
     mut path: &mut Vec<String>,
     mut curr_def_level: i16,
     mut curr_rep_level: i16,
@@ -84,15 +119,15 @@ impl<'a> ValueReader<'a> {
       let col_descr = row_group_reader.metadata().column(orig_index).column_descr_ptr();
       let col_reader = row_group_reader.get_column_reader(orig_index).unwrap();
       let col_vector = ColumnVector::new(col_descr, col_reader, 4);
-      ValueReader::PrimitiveReader(field.name(), col_vector)
+      ValueReader::PrimitiveReader(field, col_vector)
     } else {
       let mut readers = Vec::new();
       for child in field.get_fields() {
-        let reader = Self::reader_tree(child, &mut path,
+        let reader = Self::reader_tree(child.clone(), &mut path,
           curr_def_level, curr_rep_level, paths, row_group_reader);
         readers.push(reader);
       }
-      ValueReader::GroupReader(field.name(), repetition, curr_def_level, readers)
+      ValueReader::GroupReader(Some(field), repetition, curr_def_level, readers)
     };
     path.pop();
 
@@ -135,15 +170,18 @@ impl<'a> ValueReader<'a> {
           }
         }
         Row::Group(fields)
-      }
+      },
     }
   }
 
   fn field_name(&self) -> &str {
     match *self {
-      ValueReader::PrimitiveReader(field_name, _) => field_name,
+      ValueReader::PrimitiveReader(ref field, _) => field.name(),
       ValueReader::OptionReader(_, ref reader) => reader.field_name(),
-      ValueReader::GroupReader(field_name, _, _, _) => field_name
+      ValueReader::GroupReader(ref opt, _, _, _) => match opt {
+        &Some(ref field) => field.name(),
+        &None => panic!("Field is None for group reader"),
+      }
     }
   }
 
@@ -169,17 +207,7 @@ impl<'a> ValueReader<'a> {
         for reader in readers {
           reader.advance_columns();
         }
-      }
-    }
-  }
-
-  /// Reads records using current reader's record materializer.
-  /// Reads at most `num_records` rows.
-  /// TODO: Change to return an iterator
-  pub fn read_records(&mut self, num_records: usize) {
-    self.advance_columns();
-    for i in 0..num_records {
-      println!("record {} - {}", i, self.read());
+      },
     }
   }
 }

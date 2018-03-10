@@ -30,7 +30,7 @@ use schema::types::{self, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
-use record::values::ValueReader;
+use record::reader::{ValueReader, RowIter};
 use util::io::FileHandle;
 use util::memory::ByteBufferPtr;
 
@@ -73,8 +73,8 @@ pub trait RowGroupReader<'a> {
   /// Get value reader for the `i`th column chunk
   fn get_column_reader(&self, i: usize) -> Result<ColumnReader>;
 
-  /// Read all data from row group
-  fn read_data(&self, projection: Rc<SchemaType>);
+  /// Get row iterator for this row group
+  fn get_row_iter(&self, projection: Rc<SchemaType>) -> RowIter;
 }
 
 
@@ -184,7 +184,6 @@ impl FileReader for SerializedFileReader {
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
 
-  // TODO: return iterator
   fn read_data(&self, projection: SchemaType) {
     // check if projection is part of file schema
     let root_schema = self.metadata().file_metadata().schema_descr().root_schema();
@@ -197,7 +196,11 @@ impl FileReader for SerializedFileReader {
     let proj = Rc::new(projection);
     for i in 0..self.num_row_groups() {
       println!("* reading row group {}", i);
-      self.get_row_group(i).unwrap().read_data(proj.clone());
+      let row_group_reader = self.get_row_group(i).unwrap();
+      let mut iter = row_group_reader.get_row_iter(proj.clone());
+      while let Some(row) = iter.next() {
+        println!("{}", row);
+      }
     }
   }
 }
@@ -266,10 +269,9 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
     Ok(col_reader)
   }
 
-  fn read_data(&self, projection: Rc<SchemaType>) {
-    let proj_descr = &SchemaDescriptor::new(projection);
-    let mut reader = ValueReader::new(proj_descr, self);
-    reader.read_records(self.metadata().num_rows() as usize);
+  fn get_row_iter(&self, projection: Rc<SchemaType>) -> RowIter {
+    let proj_descr = SchemaDescriptor::new(projection);
+    ValueReader::row_iter(proj_descr, self)
   }
 }
 
