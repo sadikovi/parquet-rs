@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use record::api::PrimitiveConverter;
-use basic::{Type as PhysicalType};
+use record::api::Row;
+use basic::{Type as PhysicalType, LogicalType};
 use column::reader::{ColumnReader, ColumnReaderImpl, get_typed_column_reader};
 use data_type::*;
 use errors::{Result, ParquetError};
@@ -117,6 +117,34 @@ impl<'a> ColumnVector<'a> {
     }
   }
 
+  /// Returns current repetition level for a leaf vector
+  pub fn current_rep_level(&self) -> i16 {
+    match *self {
+      ColumnVector::BoolColumnVector(ref typed) => typed.current_rep_level(),
+      ColumnVector::Int32ColumnVector(ref typed) => typed.current_rep_level(),
+      ColumnVector::Int64ColumnVector(ref typed) => typed.current_rep_level(),
+      ColumnVector::Int96ColumnVector(ref typed) => typed.current_rep_level(),
+      ColumnVector::FloatColumnVector(ref typed) => typed.current_rep_level(),
+      ColumnVector::DoubleColumnVector(ref typed) => typed.current_rep_level(),
+      ColumnVector::ByteArrayColumnVector(ref typed) => typed.current_rep_level(),
+      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => typed.current_rep_level()
+    }
+  }
+
+  /// Returns max repetition level for a leaf vector
+  pub fn max_rep_level(&self) -> i16 {
+    match *self {
+      ColumnVector::BoolColumnVector(ref typed) => typed.max_rep_level(),
+      ColumnVector::Int32ColumnVector(ref typed) => typed.max_rep_level(),
+      ColumnVector::Int64ColumnVector(ref typed) => typed.max_rep_level(),
+      ColumnVector::Int96ColumnVector(ref typed) => typed.max_rep_level(),
+      ColumnVector::FloatColumnVector(ref typed) => typed.max_rep_level(),
+      ColumnVector::DoubleColumnVector(ref typed) => typed.max_rep_level(),
+      ColumnVector::ByteArrayColumnVector(ref typed) => typed.max_rep_level(),
+      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => typed.max_rep_level()
+    }
+  }
+
   /// Returns true, if current value is null.
   /// Based on the fact that for non-null value current definition level
   /// equals to max definition level.
@@ -124,33 +152,35 @@ impl<'a> ColumnVector<'a> {
     self.current_def_level() < self.max_def_level()
   }
 
-  /// Updates non-null value for primitive converter.
-  pub fn update_value(&self, converter: &mut PrimitiveConverter) {
-    assert!(self.is_null(), "Value is null");
+  /// Updates non-null value for current row.
+  pub fn current_value(&self) -> Row {
+    assert!(!self.is_null(), "Value is null");
     match *self {
       ColumnVector::BoolColumnVector(ref typed) => {
-        converter.add_boolean(*typed.current_value());
+        Row::new_bool(*typed.current_value())
       },
       ColumnVector::Int32ColumnVector(ref typed) => {
-        converter.add_int32(*typed.current_value());
+        Row::new_int32(typed.logical_type(), *typed.current_value())
       },
       ColumnVector::Int64ColumnVector(ref typed) => {
-        converter.add_int64(*typed.current_value());
+        Row::new_int64(typed.logical_type(), *typed.current_value())
       },
       ColumnVector::Int96ColumnVector(ref typed) => {
-        converter.add_int96(typed.current_value().clone());
+        Row::new_int96(typed.logical_type(), typed.current_value().clone())
       },
       ColumnVector::FloatColumnVector(ref typed) => {
-        converter.add_float(*typed.current_value());
+        Row::new_float(*typed.current_value())
       },
       ColumnVector::DoubleColumnVector(ref typed) => {
-        converter.add_double(*typed.current_value());
+        Row::new_double(*typed.current_value())
       },
       ColumnVector::ByteArrayColumnVector(ref typed) => {
-        converter.add_byte_array(typed.current_value().clone());
+        Row::new_byte_array(
+          typed.physical_type(), typed.logical_type(), typed.current_value().clone())
       },
       ColumnVector::FixedLenByteArrayColumnVector(ref typed) => {
-        converter.add_fixed_len_byte_array(typed.current_value().clone());
+        Row::new_byte_array(
+          typed.physical_type(), typed.logical_type(), typed.current_value().clone())
       }
     }
   }
@@ -194,6 +224,8 @@ impl<'a> ColumnVector<'a> {
 /// Provides per-element access.
 pub struct TypedColumnVector<'a, T: DataType> {
   reader: ColumnReaderImpl<'a, T>,
+  physical_type: PhysicalType,
+  logical_type: LogicalType,
   batch_size: usize,
   // type properties
   max_def_level: i16,
@@ -222,6 +254,8 @@ impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
 
     Self {
       reader: get_typed_column_reader(column_reader),
+      physical_type: descr.physical_type(),
+      logical_type: descr.logical_type(),
       batch_size: batch_size,
       max_def_level: max_def_level,
       max_rep_level: max_rep_level,
@@ -231,6 +265,16 @@ impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
       curr_triplet_index: 0,
       triplets_left: 0
     }
+  }
+
+  /// Returns physical type for the current column vector.
+  pub fn physical_type(&self) -> PhysicalType {
+    self.physical_type
+  }
+
+  /// Returns logical type for the current column vector.
+  pub fn logical_type(&self) -> LogicalType {
+    self.logical_type
   }
 
   fn max_def_level(&self) -> i16 {

@@ -15,42 +15,93 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use schema::types::{Type as SchemaType};
-use data_type::*;
+use std::collections::HashMap;
+use std::fmt;
+use basic::{Type as PhysicalType, LogicalType};
+use data_type::{ByteArray, Int96};
 
-pub trait RecordMaterializer {
-  // this method is called once
-  fn init(&mut self, schema: &SchemaType);
-
-  fn root_converter(&mut self) -> &mut GroupConverter;
-
-  fn consume_current_record(&mut self);
+#[derive(Clone, Debug)]
+pub enum Row {
+  Null,
+  Bool(bool),
+  Byte(i8),
+  Short(i16),
+  Int(i32),
+  Long(i64),
+  Float(f32),
+  Double(f64),
+  Str(String),
+  Bytes(ByteArray), // should we change to Vec<u8>?
+  Group(HashMap<String, Row>)
 }
 
-pub trait GroupConverter {
-  fn start(&mut self);
+impl Row {
+  pub fn new_bool(value: bool) -> Self {
+    Row::Bool(value)
+  }
 
-  fn end(&mut self);
+  pub fn new_int32(logical_type: LogicalType, value: i32) -> Self {
+    match logical_type {
+      LogicalType::INT_8 => Row::Byte(value as i8),
+      LogicalType::INT_16 => Row::Short(value as i16),
+      LogicalType::INT_32 | LogicalType::NONE => Row::Int(value),
+      _ => unimplemented!()
+    }
+  }
 
-  fn child_group_converter(&mut self, ordinal: usize) -> &mut GroupConverter;
+  pub fn new_int64(logical_type: LogicalType, value: i64) -> Self {
+    match logical_type {
+      LogicalType::INT_64 | LogicalType::NONE => Row::Long(value),
+      _ => unimplemented!()
+    }
+  }
 
-  fn child_primitive_converter(&mut self, ordinal: usize) -> &mut PrimitiveConverter;
+  pub fn new_int96(_logical_type: LogicalType, _value: Int96) -> Self {
+    unimplemented!();
+  }
+
+  pub fn new_float(value: f32) -> Self {
+    Row::Float(value)
+  }
+
+  pub fn new_double(value: f64) -> Self {
+    Row::Double(value)
+  }
+
+  pub fn new_byte_array(
+    physical_type: PhysicalType,
+    logical_type: LogicalType,
+    value: ByteArray
+  ) -> Self {
+    match physical_type {
+      PhysicalType::BYTE_ARRAY => {
+        match logical_type {
+          LogicalType::UTF8 | LogicalType::ENUM | LogicalType::JSON => {
+            Row::Str(String::from_utf8(value.data().to_vec()).unwrap())
+          },
+          LogicalType::BSON | LogicalType::NONE => Row::Bytes(value),
+          _ => unimplemented!()
+        }
+      },
+      _ => unimplemented!()
+    }
+  }
 }
 
-pub trait PrimitiveConverter {
-  fn add_boolean(&mut self, value: bool);
-
-  fn add_int32(&mut self, value: i32);
-
-  fn add_int64(&mut self, value: i64);
-
-  fn add_int96(&mut self, value: Int96);
-
-  fn add_float(&mut self, value: f32);
-
-  fn add_double(&mut self, value: f64);
-
-  fn add_byte_array(&mut self, value: ByteArray);
-
-  fn add_fixed_len_byte_array(&mut self, value: ByteArray);
+impl fmt::Display for Row {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match *self {
+      Row::Null => write!(f, "null"),
+      Row::Bool(value) => write!(f, "{}", value),
+      Row::Byte(value) => write!(f, "{}", value),
+      Row::Short(value) => write!(f, "{}", value),
+      Row::Int(value) => write!(f, "{}", value),
+      Row::Long(value) => write!(f, "{}", value),
+      Row::Float(value) => write!(f, "{}", value),
+      Row::Double(value) => write!(f, "{}", value),
+      Row::Str(ref value) => write!(f, "{}", value),
+      Row::Bytes(ref value) => write!(f, "{:?}", value.data()),
+      Row::Group(ref map) => write!(f, "{:?}", map)
+    }
+  }
 }
