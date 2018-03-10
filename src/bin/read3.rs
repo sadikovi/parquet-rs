@@ -20,7 +20,7 @@ extern crate parquet;
 use std::fs::File;
 use std::path::Path;
 
-use parquet::record::vector::ColumnVector;
+use parquet::record::triplet::TripletIter;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::schema::printer::print_file_metadata;
 
@@ -52,7 +52,7 @@ fn main() {
 
       println!("- Reading column '{}' of type {}", column_path, column_type);
 
-      let mut vector = ColumnVector::new(column_descr, column_reader, batch_size);
+      let mut vector = TripletIter::new(column_descr, column_reader, batch_size);
       while vector.consume().unwrap() {
         vector.print_test_value();
       }

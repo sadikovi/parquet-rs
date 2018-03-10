@@ -30,7 +30,7 @@ use schema::types::{self, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
-use record::reader::{ValueReader, RowIter};
+use record::reader::{Reader as RecordReader, RowIter};
 use util::io::FileHandle;
 use util::memory::ByteBufferPtr;
 
@@ -271,7 +271,7 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
 
   fn get_row_iter(&self, projection: Rc<SchemaType>) -> RowIter {
     let proj_descr = SchemaDescriptor::new(projection);
-    ValueReader::row_iter(proj_descr, self)
+    RecordReader::row_iter(proj_descr, self)
   }
 }
 

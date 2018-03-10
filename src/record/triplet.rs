@@ -24,52 +24,52 @@ use schema::types::ColumnDescPtr;
 
 /// High level API wrapper on column reader.
 /// Provides per-element access for each primitive column.
-pub enum ColumnVector<'a> {
-  BoolColumnVector(TypedColumnVector<'a, BoolType>),
-  Int32ColumnVector(TypedColumnVector<'a, Int32Type>),
-  Int64ColumnVector(TypedColumnVector<'a, Int64Type>),
-  Int96ColumnVector(TypedColumnVector<'a, Int96Type>),
-  FloatColumnVector(TypedColumnVector<'a, FloatType>),
-  DoubleColumnVector(TypedColumnVector<'a, DoubleType>),
-  ByteArrayColumnVector(TypedColumnVector<'a, ByteArrayType>),
-  FixedLenByteArrayColumnVector(TypedColumnVector<'a, FixedLenByteArrayType>)
+pub enum TripletIter<'a> {
+  BoolTripletIter(TypedTripletIter<'a, BoolType>),
+  Int32TripletIter(TypedTripletIter<'a, Int32Type>),
+  Int64TripletIter(TypedTripletIter<'a, Int64Type>),
+  Int96TripletIter(TypedTripletIter<'a, Int96Type>),
+  FloatTripletIter(TypedTripletIter<'a, FloatType>),
+  DoubleTripletIter(TypedTripletIter<'a, DoubleType>),
+  ByteArrayTripletIter(TypedTripletIter<'a, ByteArrayType>),
+  FixedLenByteArrayTripletIter(TypedTripletIter<'a, FixedLenByteArrayType>)
 }
 
-impl<'a> ColumnVector<'a> {
+impl<'a> TripletIter<'a> {
   /// Creates new column vector for column reader
   pub fn new(descr: ColumnDescPtr, reader: ColumnReader<'a>, batch_size: usize) -> Self {
     match descr.physical_type() {
       PhysicalType::BOOLEAN => {
-        ColumnVector::BoolColumnVector(
-          TypedColumnVector::new(descr, batch_size, reader))
+        TripletIter::BoolTripletIter(
+          TypedTripletIter::new(descr, batch_size, reader))
       },
       PhysicalType::INT32 => {
-        ColumnVector::Int32ColumnVector(
-          TypedColumnVector::new(descr, batch_size, reader))
+        TripletIter::Int32TripletIter(
+          TypedTripletIter::new(descr, batch_size, reader))
       },
       PhysicalType::INT64 => {
-        ColumnVector::Int64ColumnVector(
-          TypedColumnVector::new(descr, batch_size, reader))
+        TripletIter::Int64TripletIter(
+          TypedTripletIter::new(descr, batch_size, reader))
       },
       PhysicalType::INT96 => {
-        ColumnVector::Int96ColumnVector(
-          TypedColumnVector::new(descr, batch_size, reader))
+        TripletIter::Int96TripletIter(
+          TypedTripletIter::new(descr, batch_size, reader))
       },
       PhysicalType::FLOAT => {
-        ColumnVector::FloatColumnVector(
-          TypedColumnVector::new(descr, batch_size, reader))
+        TripletIter::FloatTripletIter(
+          TypedTripletIter::new(descr, batch_size, reader))
       },
       PhysicalType::DOUBLE => {
-        ColumnVector::DoubleColumnVector(
-          TypedColumnVector::new(descr, batch_size, reader))
+        TripletIter::DoubleTripletIter(
+          TypedTripletIter::new(descr, batch_size, reader))
       },
       PhysicalType::BYTE_ARRAY => {
-        ColumnVector::ByteArrayColumnVector(
-          TypedColumnVector::new(descr, batch_size, reader))
+        TripletIter::ByteArrayTripletIter(
+          TypedTripletIter::new(descr, batch_size, reader))
       },
       PhysicalType::FIXED_LEN_BYTE_ARRAY => {
-        ColumnVector::FixedLenByteArrayColumnVector(
-          TypedColumnVector::new(descr, batch_size, reader))
+        TripletIter::FixedLenByteArrayTripletIter(
+          TypedTripletIter::new(descr, batch_size, reader))
       }
     }
   }
@@ -78,70 +78,70 @@ impl<'a> ColumnVector<'a> {
   /// Should be called once - either before `is_null` or `update_value`.
   pub fn consume(&mut self) -> Result<bool> {
     match *self {
-      ColumnVector::BoolColumnVector(ref mut typed) => typed.consume(),
-      ColumnVector::Int32ColumnVector(ref mut typed) => typed.consume(),
-      ColumnVector::Int64ColumnVector(ref mut typed) => typed.consume(),
-      ColumnVector::Int96ColumnVector(ref mut typed) => typed.consume(),
-      ColumnVector::FloatColumnVector(ref mut typed) => typed.consume(),
-      ColumnVector::DoubleColumnVector(ref mut typed) => typed.consume(),
-      ColumnVector::ByteArrayColumnVector(ref mut typed) => typed.consume(),
-      ColumnVector::FixedLenByteArrayColumnVector(ref mut typed) => typed.consume()
+      TripletIter::BoolTripletIter(ref mut typed) => typed.consume(),
+      TripletIter::Int32TripletIter(ref mut typed) => typed.consume(),
+      TripletIter::Int64TripletIter(ref mut typed) => typed.consume(),
+      TripletIter::Int96TripletIter(ref mut typed) => typed.consume(),
+      TripletIter::FloatTripletIter(ref mut typed) => typed.consume(),
+      TripletIter::DoubleTripletIter(ref mut typed) => typed.consume(),
+      TripletIter::ByteArrayTripletIter(ref mut typed) => typed.consume(),
+      TripletIter::FixedLenByteArrayTripletIter(ref mut typed) => typed.consume()
     }
   }
 
   /// Returns current definition level for a leaf vector
   pub fn current_def_level(&self) -> i16 {
     match *self {
-      ColumnVector::BoolColumnVector(ref typed) => typed.current_def_level(),
-      ColumnVector::Int32ColumnVector(ref typed) => typed.current_def_level(),
-      ColumnVector::Int64ColumnVector(ref typed) => typed.current_def_level(),
-      ColumnVector::Int96ColumnVector(ref typed) => typed.current_def_level(),
-      ColumnVector::FloatColumnVector(ref typed) => typed.current_def_level(),
-      ColumnVector::DoubleColumnVector(ref typed) => typed.current_def_level(),
-      ColumnVector::ByteArrayColumnVector(ref typed) => typed.current_def_level(),
-      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => typed.current_def_level()
+      TripletIter::BoolTripletIter(ref typed) => typed.current_def_level(),
+      TripletIter::Int32TripletIter(ref typed) => typed.current_def_level(),
+      TripletIter::Int64TripletIter(ref typed) => typed.current_def_level(),
+      TripletIter::Int96TripletIter(ref typed) => typed.current_def_level(),
+      TripletIter::FloatTripletIter(ref typed) => typed.current_def_level(),
+      TripletIter::DoubleTripletIter(ref typed) => typed.current_def_level(),
+      TripletIter::ByteArrayTripletIter(ref typed) => typed.current_def_level(),
+      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.current_def_level()
     }
   }
 
   /// Returns max definition level for a leaf vector
   pub fn max_def_level(&self) -> i16 {
     match *self {
-      ColumnVector::BoolColumnVector(ref typed) => typed.max_def_level(),
-      ColumnVector::Int32ColumnVector(ref typed) => typed.max_def_level(),
-      ColumnVector::Int64ColumnVector(ref typed) => typed.max_def_level(),
-      ColumnVector::Int96ColumnVector(ref typed) => typed.max_def_level(),
-      ColumnVector::FloatColumnVector(ref typed) => typed.max_def_level(),
-      ColumnVector::DoubleColumnVector(ref typed) => typed.max_def_level(),
-      ColumnVector::ByteArrayColumnVector(ref typed) => typed.max_def_level(),
-      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => typed.max_def_level()
+      TripletIter::BoolTripletIter(ref typed) => typed.max_def_level(),
+      TripletIter::Int32TripletIter(ref typed) => typed.max_def_level(),
+      TripletIter::Int64TripletIter(ref typed) => typed.max_def_level(),
+      TripletIter::Int96TripletIter(ref typed) => typed.max_def_level(),
+      TripletIter::FloatTripletIter(ref typed) => typed.max_def_level(),
+      TripletIter::DoubleTripletIter(ref typed) => typed.max_def_level(),
+      TripletIter::ByteArrayTripletIter(ref typed) => typed.max_def_level(),
+      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.max_def_level()
     }
   }
 
   /// Returns current repetition level for a leaf vector
   pub fn current_rep_level(&self) -> i16 {
     match *self {
-      ColumnVector::BoolColumnVector(ref typed) => typed.current_rep_level(),
-      ColumnVector::Int32ColumnVector(ref typed) => typed.current_rep_level(),
-      ColumnVector::Int64ColumnVector(ref typed) => typed.current_rep_level(),
-      ColumnVector::Int96ColumnVector(ref typed) => typed.current_rep_level(),
-      ColumnVector::FloatColumnVector(ref typed) => typed.current_rep_level(),
-      ColumnVector::DoubleColumnVector(ref typed) => typed.current_rep_level(),
-      ColumnVector::ByteArrayColumnVector(ref typed) => typed.current_rep_level(),
-      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => typed.current_rep_level()
+      TripletIter::BoolTripletIter(ref typed) => typed.current_rep_level(),
+      TripletIter::Int32TripletIter(ref typed) => typed.current_rep_level(),
+      TripletIter::Int64TripletIter(ref typed) => typed.current_rep_level(),
+      TripletIter::Int96TripletIter(ref typed) => typed.current_rep_level(),
+      TripletIter::FloatTripletIter(ref typed) => typed.current_rep_level(),
+      TripletIter::DoubleTripletIter(ref typed) => typed.current_rep_level(),
+      TripletIter::ByteArrayTripletIter(ref typed) => typed.current_rep_level(),
+      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.current_rep_level()
     }
   }
 
   /// Returns max repetition level for a leaf vector
   pub fn max_rep_level(&self) -> i16 {
     match *self {
-      ColumnVector::BoolColumnVector(ref typed) => typed.max_rep_level(),
-      ColumnVector::Int32ColumnVector(ref typed) => typed.max_rep_level(),
-      ColumnVector::Int64ColumnVector(ref typed) => typed.max_rep_level(),
-      ColumnVector::Int96ColumnVector(ref typed) => typed.max_rep_level(),
-      ColumnVector::FloatColumnVector(ref typed) => typed.max_rep_level(),
-      ColumnVector::DoubleColumnVector(ref typed) => typed.max_rep_level(),
-      ColumnVector::ByteArrayColumnVector(ref typed) => typed.max_rep_level(),
-      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => typed.max_rep_level()
+      TripletIter::BoolTripletIter(ref typed) => typed.max_rep_level(),
+      TripletIter::Int32TripletIter(ref typed) => typed.max_rep_level(),
+      TripletIter::Int64TripletIter(ref typed) => typed.max_rep_level(),
+      TripletIter::Int96TripletIter(ref typed) => typed.max_rep_level(),
+      TripletIter::FloatTripletIter(ref typed) => typed.max_rep_level(),
+      TripletIter::DoubleTripletIter(ref typed) => typed.max_rep_level(),
+      TripletIter::ByteArrayTripletIter(ref typed) => typed.max_rep_level(),
+      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.max_rep_level()
     }
   }
 
@@ -156,29 +156,29 @@ impl<'a> ColumnVector<'a> {
   pub fn current_value(&self) -> Row {
     assert!(!self.is_null(), "Value is null");
     match *self {
-      ColumnVector::BoolColumnVector(ref typed) => {
+      TripletIter::BoolTripletIter(ref typed) => {
         Row::new_bool(*typed.current_value())
       },
-      ColumnVector::Int32ColumnVector(ref typed) => {
+      TripletIter::Int32TripletIter(ref typed) => {
         Row::new_int32(typed.logical_type(), *typed.current_value())
       },
-      ColumnVector::Int64ColumnVector(ref typed) => {
+      TripletIter::Int64TripletIter(ref typed) => {
         Row::new_int64(typed.logical_type(), *typed.current_value())
       },
-      ColumnVector::Int96ColumnVector(ref typed) => {
+      TripletIter::Int96TripletIter(ref typed) => {
         Row::new_int96(typed.logical_type(), typed.current_value().clone())
       },
-      ColumnVector::FloatColumnVector(ref typed) => {
+      TripletIter::FloatTripletIter(ref typed) => {
         Row::new_float(*typed.current_value())
       },
-      ColumnVector::DoubleColumnVector(ref typed) => {
+      TripletIter::DoubleTripletIter(ref typed) => {
         Row::new_double(*typed.current_value())
       },
-      ColumnVector::ByteArrayColumnVector(ref typed) => {
+      TripletIter::ByteArrayTripletIter(ref typed) => {
         Row::new_byte_array(
           typed.physical_type(), typed.logical_type(), typed.current_value().clone())
       },
-      ColumnVector::FixedLenByteArrayColumnVector(ref typed) => {
+      TripletIter::FixedLenByteArrayTripletIter(ref typed) => {
         Row::new_byte_array(
           typed.physical_type(), typed.logical_type(), typed.current_value().clone())
       }
@@ -191,28 +191,28 @@ impl<'a> ColumnVector<'a> {
       println!("  is_null: {}, value: null", self.is_null());
     } else {
       match *self {
-        ColumnVector::BoolColumnVector(ref typed) => {
+        TripletIter::BoolTripletIter(ref typed) => {
           println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
         },
-        ColumnVector::Int32ColumnVector(ref typed) => {
+        TripletIter::Int32TripletIter(ref typed) => {
           println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
         },
-        ColumnVector::Int64ColumnVector(ref typed) => {
+        TripletIter::Int64TripletIter(ref typed) => {
           println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
         },
-        ColumnVector::Int96ColumnVector(ref typed) => {
+        TripletIter::Int96TripletIter(ref typed) => {
           println!("  is_null: {}, value: {:?}", self.is_null(), typed.current_value());
         },
-        ColumnVector::FloatColumnVector(ref typed) => {
+        TripletIter::FloatTripletIter(ref typed) => {
           println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
         },
-        ColumnVector::DoubleColumnVector(ref typed) => {
+        TripletIter::DoubleTripletIter(ref typed) => {
           println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
         },
-        ColumnVector::ByteArrayColumnVector(ref typed) => {
+        TripletIter::ByteArrayTripletIter(ref typed) => {
           println!("  is_null: {}, value: {:?}", self.is_null(), typed.current_value());
         },
-        ColumnVector::FixedLenByteArrayColumnVector(ref typed) => {
+        TripletIter::FixedLenByteArrayTripletIter(ref typed) => {
           println!("  is_null: {}, value: {:?}", self.is_null(), typed.current_value());
         }
       }
@@ -222,7 +222,7 @@ impl<'a> ColumnVector<'a> {
 
 /// Internal column vector as a wrapper for column reader (primitive leaf column).
 /// Provides per-element access.
-pub struct TypedColumnVector<'a, T: DataType> {
+pub struct TypedTripletIter<'a, T: DataType> {
   reader: ColumnReaderImpl<'a, T>,
   physical_type: PhysicalType,
   logical_type: LogicalType,
@@ -240,7 +240,7 @@ pub struct TypedColumnVector<'a, T: DataType> {
   triplets_left: usize
 }
 
-impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
+impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
   /// Creates new typed column vector based on provided column reader.
   /// Use batch size to specify the amount of values to buffer from column reader.
   fn new(descr: ColumnDescPtr, batch_size: usize, column_reader: ColumnReader<'a>) -> Self {
@@ -341,9 +341,6 @@ impl<'a, T: DataType> TypedColumnVector<'a, T> where T: 'static {
       if values_read == 0 && levels_read == 0 {
         return Ok(false);
       }
-
-      // println!("  ~ values_read: {}, levels_read: {}", values_read, levels_read);
-      // println!("  ~ values: {:?}, def_levels: {:?}, rep_levels: {:?}", self.values, self.def_levels, self.rep_levels);
 
       // We never read values more than levels
       if levels_read == 0 || values_read == levels_read {
