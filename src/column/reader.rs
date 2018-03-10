@@ -131,8 +131,8 @@ impl<'a, T: DataType> ColumnReaderImpl<'a, T> where T: 'static {
   /// If `def_levels` or `rep_levels` is `None`, this will also skip reading the
   /// respective levels. This is useful when the caller of this function knows in advance
   /// that the field is required and non-repeated, therefore can avoid allocating memory
-  /// for the levels data. Note that if field has definition levels, but caller provdes None,
-  /// there might be inconsistency between levels/values (see inline comments below).
+  /// for the levels data. Note that if field has definition levels, but caller provides
+  /// None, there might be inconsistency between levels/values (see comments below).
   ///
   /// Returns a tuple where the first element is the actual number of values read,
   /// and the second element is the actual number of levels read.
@@ -340,13 +340,7 @@ impl<'a, T: DataType> ColumnReaderImpl<'a, T> where T: 'static {
         // Search cache for data page decoder
         if !self.decoders.contains_key(&encoding) {
           // Initialize decoder for this page
-          // TODO: support other types of encodings
-          let data_decoder = match encoding {
-            Encoding::PLAIN => get_decoder::<T>(self.descr.clone(), encoding)?,
-            Encoding::DELTA_BINARY_PACKED =>
-              get_decoder::<T>(self.descr.clone(), encoding)?,
-            en => return Err(nyi_err!("Unsupported encoding {}", en))
-          };
+          let data_decoder = get_decoder::<T>(self.descr.clone(), encoding)?;
           self.decoders.insert(encoding, data_decoder);
         }
         self.decoders.get_mut(&encoding).unwrap()
@@ -539,6 +533,42 @@ mod tests {
   test!(test_read_dict_v2_int64, i64, dict_v2, MAX_DEF_LEVEL, MAX_REP_LEVEL,
     NUM_PAGES, NUM_LEVELS, 16, 0, 3);
 
+  #[test]
+  fn test_read_batch_values_only() {
+    test_read_batch_int32(16, &mut vec![0; 10], None, None); // < batch_size
+    test_read_batch_int32(16, &mut vec![0; 16], None, None); // == batch_size
+    test_read_batch_int32(16, &mut vec![0; 51], None, None); // > batch_size
+  }
+
+  #[test]
+  fn test_read_batch_values_def_levels() {
+    test_read_batch_int32(16, &mut vec![0; 10], Some(&mut vec![0; 10]), None);
+    test_read_batch_int32(16, &mut vec![0; 16], Some(&mut vec![0; 16]), None);
+    test_read_batch_int32(16, &mut vec![0; 51], Some(&mut vec![0; 51]), None);
+  }
+
+  #[test]
+  fn test_read_batch_values_rep_levels() {
+    test_read_batch_int32(16, &mut vec![0; 10], None, Some(&mut vec![0; 10]));
+    test_read_batch_int32(16, &mut vec![0; 16], None, Some(&mut vec![0; 16]));
+    test_read_batch_int32(16, &mut vec![0; 51], None, Some(&mut vec![0; 51]));
+  }
+
+  #[test]
+  fn test_read_batch_different_buf_sizes() {
+    test_read_batch_int32(
+      16, &mut vec![0; 8], Some(&mut vec![0; 9]), Some(&mut vec![0; 7]));
+    test_read_batch_int32(
+      16, &mut vec![0; 1], Some(&mut vec![0; 9]), Some(&mut vec![0; 3]));
+  }
+
+  #[test]
+  fn test_read_batch_values_def_rep_levels() {
+    test_read_batch_int32(
+      128, &mut vec![0; 128], Some(&mut vec![0; 128]), Some(&mut vec![0; 128]));
+  }
+
+  // == helper methods to make pages and test ==
 
   fn get_test_int32_type() -> SchemaType {
     SchemaType::primitive_type_builder("a", PhysicalType::INT32)
@@ -556,6 +586,35 @@ mod tests {
       .with_length(-1)
       .build()
       .expect("build() should be OK")
+  }
+
+  // Tests `read_batch()` functionality for Int32Type.
+  fn test_read_batch_int32(
+    batch_size: usize,
+    values: &mut[i32],
+    def_levels: Option<&mut [i16]>,
+    rep_levels: Option<&mut [i16]>
+  ) {
+    let primitive_type = get_test_int32_type();
+    // make field is required based on provided slices of levels
+    let max_def_level = if def_levels.is_some() { MAX_DEF_LEVEL } else { 0 };
+    let max_rep_level = if def_levels.is_some() { MAX_REP_LEVEL } else { 0 };
+
+    let desc = Rc::new(ColumnDescriptor::new(
+      Rc::new(primitive_type), None, max_def_level, max_rep_level,
+      ColumnPath::new(Vec::new())));
+    let mut tester = ColumnReaderTester::<Int32Type>::new();
+    tester.test_read_batch(
+      desc,
+      NUM_PAGES,
+      NUM_LEVELS,
+      batch_size,
+      ::std::i32::MIN,
+      ::std::i32::MAX,
+      values,
+      def_levels,
+      rep_levels
+    );
   }
 
   struct ColumnReaderTester<T: DataType>
@@ -722,7 +781,69 @@ mod tests {
         "def content doesn't match");
       assert_eq!(
         &actual_values[..curr_values_read], &self.values[..],
-        "values doesn't match");
+        "values content doesn't match");
+    }
+
+    // Helper function to test `read_batch()` method with custom buffers for values,
+    // definition and repetition levels.
+    fn test_read_batch(
+      &mut self,
+      desc: ColumnDescPtr,
+      num_pages: usize,
+      num_levels: usize,
+      batch_size: usize,
+      min: T::T,
+      max: T::T,
+      values: &mut [T::T],
+      mut def_levels: Option<&mut [i16]>,
+      mut rep_levels: Option<&mut [i16]>
+    ) {
+      let mut pages = VecDeque::new();
+      make_pages::<T>(
+        desc.clone(), Encoding::RLE_DICTIONARY, num_pages, num_levels, min, max,
+        &mut self.def_levels, &mut self.rep_levels, &mut self.values, &mut pages, false);
+
+      let page_reader = TestPageReader::new(Vec::from(pages));
+      let column_reader: ColumnReader = get_column_reader(desc, Box::new(page_reader));
+      let mut typed_column_reader = get_typed_column_reader::<T>(column_reader);
+
+      let (values_read, levels_read) = {
+        let actual_def_levels = match def_levels {
+          Some(ref mut vec) => Some(&mut vec[..]),
+          None => None
+        };
+
+        let actual_rep_levels = match rep_levels {
+          Some(ref mut vec) => Some(&mut vec[..]),
+          None => None
+        };
+
+        typed_column_reader.read_batch(
+          batch_size,
+          actual_def_levels,
+          actual_rep_levels,
+          values
+        ).expect("read_batch() should be OK")
+      };
+
+      assert!(values.len() >= values_read, "values.len() >= values_read");
+      assert_eq!(&values[0..values_read], &self.values[0..values_read]);
+
+      if let Some(ref levels) = def_levels {
+        assert!(levels.len() >= levels_read, "def_levels.len() >= levels_read");
+        assert_eq!(&levels[0..levels_read], &self.def_levels[0..levels_read]);
+      }
+
+      if let Some(ref levels) = rep_levels {
+        assert!(levels.len() >= levels_read, "rep_levels.len() >= levels_read");
+        assert_eq!(&levels[0..levels_read], &self.rep_levels[0..levels_read]);
+      }
+
+      if def_levels.is_none() && rep_levels.is_none() {
+        assert!(levels_read == 0, "Expected to read 0 levels, found {}", levels_read);
+      } else if def_levels.is_some() {
+        assert!(levels_read >= values_read, "Expected levels >= values");
+      }
     }
   }
 
@@ -773,8 +894,9 @@ mod tests {
   }
 
   impl DataPageBuilderImpl {
-    // `num_values` is the number of values to put in the data page. `datapage_v2` is used
-    // to indicate whether the generated data page should use V2 format or not.
+    // `num_values` is the number of non-null values to put in the data page.
+    // `datapage_v2` flag is used to indicate if the generated data page should use V2
+    // format or not.
     fn new(desc: ColumnDescPtr, num_values: u32, datapage_v2: bool) -> Self {
       DataPageBuilderImpl {
         desc: desc,
@@ -909,7 +1031,8 @@ mod tests {
 
       // Generate the current page
 
-      let mut pb = DataPageBuilderImpl::new(desc.clone(), levels_per_page as u32, use_v2);
+      let mut pb = DataPageBuilderImpl::new(desc.clone(),
+        num_values_cur_page as u32, use_v2);
       if max_rep_level > 0 {
         pb.add_rep_levels(max_rep_level, &rep_levels[level_range.clone()]);
       }
