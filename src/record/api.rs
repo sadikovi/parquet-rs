@@ -99,8 +99,8 @@ impl fmt::Display for Row {
       Row::Short(value) => write!(f, "{}", value),
       Row::Int(value) => write!(f, "{}", value),
       Row::Long(value) => write!(f, "{}", value),
-      Row::Float(value) => write!(f, "{}", value),
-      Row::Double(value) => write!(f, "{}", value),
+      Row::Float(value) => write!(f, "{:?}", value),
+      Row::Double(value) => write!(f, "{:?}", value),
       Row::Str(ref value) => write!(f, "\"{}\"", value),
       Row::Bytes(ref value) => write!(f, "{:?}", value.data()),
       Row::Group(ref fields) => {
