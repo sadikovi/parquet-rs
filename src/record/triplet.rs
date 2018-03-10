@@ -200,40 +200,6 @@ impl<'a> TripletIter<'a> {
       }
     }
   }
-
-  /// Test method to print values being traversed.
-  pub fn print_test_value(&self) {
-    if self.is_null() {
-      println!("  is_null: {}, value: null", self.is_null());
-    } else {
-      match *self {
-        TripletIter::BoolTripletIter(ref typed) => {
-          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
-        },
-        TripletIter::Int32TripletIter(ref typed) => {
-          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
-        },
-        TripletIter::Int64TripletIter(ref typed) => {
-          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
-        },
-        TripletIter::Int96TripletIter(ref typed) => {
-          println!("  is_null: {}, value: {:?}", self.is_null(), typed.current_value());
-        },
-        TripletIter::FloatTripletIter(ref typed) => {
-          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
-        },
-        TripletIter::DoubleTripletIter(ref typed) => {
-          println!("  is_null: {}, value: {}", self.is_null(), typed.current_value());
-        },
-        TripletIter::ByteArrayTripletIter(ref typed) => {
-          println!("  is_null: {}, value: {:?}", self.is_null(), typed.current_value());
-        },
-        TripletIter::FixedLenByteArrayTripletIter(ref typed) => {
-          println!("  is_null: {}, value: {:?}", self.is_null(), typed.current_value());
-        }
-      }
-    }
-  }
 }
 
 /// Internal column vector as a wrapper for column reader (primitive leaf column).
