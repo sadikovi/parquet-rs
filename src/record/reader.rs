@@ -49,6 +49,11 @@ impl<'a> Iterator for RowIter<'a> {
   }
 }
 
+// TODO: Add builder pattern and make batch size configurable with default around
+// 128/256 records.
+const BATCH_SIZE: usize = 4;
+
+/// Reader tree for record assembly
 pub enum Reader<'a> {
   PrimitiveReader(TypePtr, TripletIter<'a>),
   OptionReader(i16, Box<Reader<'a>>),
@@ -119,9 +124,8 @@ impl<'a> Reader<'a> {
       let orig_index = *paths.get(&col_path).unwrap();
       let col_descr = row_group_reader.metadata().column(orig_index).column_descr_ptr();
       let col_reader = row_group_reader.get_column_reader(orig_index).unwrap();
-      // TODO: Propagate batch size
-      let col_vector = TripletIter::new(col_descr, col_reader, 4);
-      Reader::PrimitiveReader(field, col_vector)
+      let column = TripletIter::new(col_descr, col_reader, BATCH_SIZE);
+      Reader::PrimitiveReader(field, column)
     } else {
       match field.get_basic_info().logical_type() {
         // List types
