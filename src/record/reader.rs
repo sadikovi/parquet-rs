@@ -149,7 +149,7 @@ impl<'a> Reader<'a> {
             path.push(String::from(repeated_field.name()));
 
             let reader = Self::reader_tree(child_field, &mut path,
-              curr_def_level + 1, curr_rep_level, paths, row_group_reader);
+              curr_def_level + 1, curr_rep_level + 1, paths, row_group_reader);
 
             path.pop();
 
@@ -175,11 +175,11 @@ impl<'a> Reader<'a> {
           assert!(key_type.is_primitive(),
             "Map key type is expected to be a primitive type, but found {:?}", key_type);
           let key_reader = Self::reader_tree(key_type.clone(), &mut path,
-            curr_def_level + 1, curr_rep_level, paths, row_group_reader);
+            curr_def_level + 1, curr_rep_level + 1, paths, row_group_reader);
 
           let value_type = &key_value_type.get_fields()[1];
           let value_reader = Self::reader_tree(value_type.clone(), &mut path,
-            curr_def_level + 1, curr_rep_level, paths, row_group_reader);
+            curr_def_level + 1, curr_rep_level + 1, paths, row_group_reader);
 
           path.pop();
 
