@@ -293,7 +293,6 @@ impl<'a> Reader<'a> {
             elements.push(reader.read());
           } else {
             reader.advance_columns();
-            elements.push(Row::Null);
             // If the current definition level is equal to the definition level of this
             // repeated type, then the result is an empty list and the repetition level
             // will always be <= rl.
