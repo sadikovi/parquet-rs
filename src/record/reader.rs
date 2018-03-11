@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use basic::{LogicalType, Repetition};
 use file::reader::RowGroupReader;
-use schema::types::{ColumnPath, SchemaDescriptor, Type, TypePtr};
+use schema::types::{ColumnPath, SchemaDescPtr, Type, TypePtr};
 use record::api::Row;
 use record::triplet::TripletIter;
 
@@ -59,7 +59,7 @@ pub enum Reader<'a> {
 
 impl<'a> Reader<'a> {
   pub fn new(
-    descr: SchemaDescriptor,
+    descr: SchemaDescPtr,
     row_group_reader: &'a RowGroupReader
   ) -> Self {
     // prepare map of column paths for pruning
@@ -84,7 +84,7 @@ impl<'a> Reader<'a> {
   }
 
   pub fn row_iter(
-    descr: SchemaDescriptor,
+    descr: SchemaDescPtr,
     row_group_reader: &'a RowGroupReader
   ) -> RowIter<'a> {
     let num_records = row_group_reader.metadata().num_rows() as usize;

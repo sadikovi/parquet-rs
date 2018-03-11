@@ -53,7 +53,7 @@ pub trait FileReader {
   fn get_row_group<'a>(&'a self, i: usize) -> Result<Box<RowGroupReader<'a> + 'a>>;
 
   /// Method to read all data, e.g. from the file
-  fn read_data(&self, projection: SchemaType);
+  fn read_data(&self, projection: SchemaType, num_records: Option<usize>);
 }
 
 /// Parquet row group reader API. With this, user can get metadata information about the
@@ -74,7 +74,7 @@ pub trait RowGroupReader<'a> {
   fn get_column_reader(&self, i: usize) -> Result<ColumnReader>;
 
   /// Get row iterator for this row group
-  fn get_row_iter(&self, projection: Rc<SchemaType>) -> RowIter;
+  fn get_row_iter(&self, proj_descr: Rc<SchemaDescriptor>) -> RowIter;
 }
 
 
@@ -184,7 +184,7 @@ impl FileReader for SerializedFileReader {
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
 
-  fn read_data(&self, projection: SchemaType) {
+  fn read_data(&self, projection: SchemaType, num_records: Option<usize>) {
     // check if projection is part of file schema
     let root_schema = self.metadata().file_metadata().schema_descr().root_schema();
     if !root_schema.check_contains(&projection) {
@@ -192,14 +192,26 @@ impl FileReader for SerializedFileReader {
       panic!("Root schema does not contain projection");
     }
 
-    println!("* reading file");
-    let proj = Rc::new(projection);
-    for i in 0..self.num_row_groups() {
-      println!("* reading row group {}", i);
-      let row_group_reader = self.get_row_group(i).unwrap();
-      let mut iter = row_group_reader.get_row_iter(proj.clone());
+    let proj_descr = Rc::new(SchemaDescriptor::new(Rc::new(projection)));
+
+    let read_all_records = num_records.is_none();
+    let mut num_records = num_records.unwrap_or(0);
+    let num_row_groups = self.num_row_groups();
+    let mut curr_row_group = 0;
+
+    while (read_all_records || num_records > 0) && curr_row_group < num_row_groups {
+      let row_group_reader = self.get_row_group(curr_row_group).unwrap();
+      curr_row_group += 1;
+
+      let mut iter = row_group_reader.get_row_iter(proj_descr.clone());
       while let Some(row) = iter.next() {
         println!("{}", row);
+        if !read_all_records {
+          num_records -= 1;
+          if num_records == 0 {
+            return;
+          }
+        }
       }
     }
   }
@@ -269,8 +281,7 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
     Ok(col_reader)
   }
 
-  fn get_row_iter(&self, projection: Rc<SchemaType>) -> RowIter {
-    let proj_descr = SchemaDescriptor::new(projection);
+  fn get_row_iter(&self, proj_descr: Rc<SchemaDescriptor>) -> RowIter {
     RecordReader::row_iter(proj_descr, self)
   }
 }

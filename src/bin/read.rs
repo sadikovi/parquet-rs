@@ -32,5 +32,5 @@ fn main() {
   print_schema(&mut std::io::stdout(), &schema);
   println!();
 
-  parquet_reader.read_data(schema);
+  parquet_reader.read_data(schema, None);
 }
