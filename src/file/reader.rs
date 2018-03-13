@@ -31,7 +31,7 @@ use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
 use record::reader::{Reader as RecordReader, RowIter};
-use util::io::FileHandle;
+use util::io::FileChunk;
 use util::memory::ByteBufferPtr;
 
 // ----------------------------------------------------------------------
@@ -249,10 +249,10 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
       col_start = col.dictionary_page_offset().unwrap();
     }
     let col_length = col.compressed_size();
-    let fh = FileHandle::new(
+    let file_chunk = FileChunk::new(
       self.buf.get_ref(), col_start as usize, col_length as usize);
     let page_reader = SerializedPageReader::new(
-      fh, col.num_values(), col.compression())?;
+      file_chunk, col.num_values(), col.compression())?;
     Ok(Box::new(page_reader))
   }
 
@@ -289,9 +289,9 @@ impl<'a> RowGroupReader<'a> for SerializedRowGroupReader<'a> {
 
 /// A serialized impl for Parquet page reader
 pub struct SerializedPageReader {
-  // The buffer which contains exactly the bytes for the column trunk
-  // to be read by this page reader
-  buf: FileHandle,
+  // The file chunk buffer which references exactly the bytes
+  // for the column trunk to be read by this page reader
+  buf: FileChunk,
 
   // The compression codec for this column chunk. Only set for
   // non-PLAIN codec.
@@ -306,7 +306,7 @@ pub struct SerializedPageReader {
 
 impl SerializedPageReader {
   pub fn new(
-    buf: FileHandle,
+    buf: FileChunk,
     total_num_values: i64,
     compression: Compression
   ) -> Result<Self> {
@@ -471,6 +471,27 @@ mod tests {
     assert!(reader_result.is_err());
     assert_eq!(reader_result.err().unwrap(),
       general_err!("Invalid parquet file. Metadata start is less than zero (-255)"));
+  }
+
+  #[test]
+  fn test_reuse_file_chunk() {
+    // This test covers the case of maintaining the correct start position in a file
+    // stream for each column reader after initializing and moving to the next one
+    // (without necessarily reading the entire column).
+    let test_file = get_test_file("alltypes_plain.parquet");
+    let reader = SerializedFileReader::new(test_file).unwrap();
+    let row_group = reader.get_row_group(0).unwrap();
+
+    let mut page_readers = Vec::new();
+    for i in 0..row_group.num_columns() {
+      page_readers.push(row_group.get_column_page_reader(i).unwrap());
+    }
+
+    // Now buffer each col reader, we do not expect any failures like:
+    // General("underlying Thrift error: end of file")
+    for mut page_reader in page_readers {
+      assert!(page_reader.get_next_page().is_ok());
+    }
   }
 
   #[test]
