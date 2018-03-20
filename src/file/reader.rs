@@ -182,10 +182,10 @@ impl FileReader for SerializedFileReader {
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
 
-  fn read_data(&self, _projection: SchemaType, _num_records: Option<usize>) {
-    /*
+  fn read_data(&self, projection: SchemaType, num_records: Option<usize>) {
     // check if projection is part of file schema
-    let root_schema = self.metadata().file_metadata().schema_descr().root_schema();
+    let file_metadata = self.metadata().file_metadata();
+    let root_schema = file_metadata.schema_descr().root_schema();
     if !root_schema.check_contains(&projection) {
       // return an error instead
       panic!("Root schema does not contain projection");
@@ -213,7 +213,6 @@ impl FileReader for SerializedFileReader {
         }
       }
     }
-    */
   }
 }
 

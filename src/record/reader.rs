@@ -68,12 +68,13 @@ impl<'a> Reader<'a> {
     row_group_reader: &'a RowGroupReader
   ) -> Self {
     // prepare map of column paths for pruning
-    let mut paths: HashMap<&ColumnPath, usize> = HashMap::new();
+    let mut paths: HashMap<ColumnPath, usize> = HashMap::new();
     let row_group_metadata = row_group_reader.metadata();
-    /*
+
     for col_index in 0..row_group_reader.num_columns() {
       let col_meta = row_group_metadata.column(col_index);
-      let col_path = col_meta.column_path();
+      // TODO: avoid cloning of column path
+      let col_path = col_meta.column_path().clone();
       paths.insert(col_path, col_index);
     }
 
@@ -88,8 +89,6 @@ impl<'a> Reader<'a> {
     // Return group reader for message type, we mark it as always required with
     // definition level 0
     Reader::GroupReader(None, Repetition::REQUIRED, 0, readers)
-    */
-    unimplemented!();
   }
 
   pub fn row_iter(
@@ -105,7 +104,7 @@ impl<'a> Reader<'a> {
     mut path: &mut Vec<String>,
     mut curr_def_level: i16,
     mut curr_rep_level: i16,
-    paths: &HashMap<&ColumnPath, usize>,
+    paths: &HashMap<ColumnPath, usize>,
     row_group_reader: &'a RowGroupReader
   ) -> Self {
     assert!(field.get_basic_info().has_repetition());
