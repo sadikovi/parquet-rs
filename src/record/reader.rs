@@ -69,8 +69,10 @@ impl<'a> Reader<'a> {
   ) -> Self {
     // prepare map of column paths for pruning
     let mut paths: HashMap<&ColumnPath, usize> = HashMap::new();
+    let row_group_metadata = row_group_reader.metadata();
+    /*
     for col_index in 0..row_group_reader.num_columns() {
-      let col_meta = row_group_reader.metadata().column(col_index);
+      let col_meta = row_group_metadata.column(col_index);
       let col_path = col_meta.column_path();
       paths.insert(col_path, col_index);
     }
@@ -86,6 +88,8 @@ impl<'a> Reader<'a> {
     // Return group reader for message type, we mark it as always required with
     // definition level 0
     Reader::GroupReader(None, Repetition::REQUIRED, 0, readers)
+    */
+    unimplemented!();
   }
 
   pub fn row_iter(

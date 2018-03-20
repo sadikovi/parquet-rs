@@ -20,7 +20,7 @@ fn main() {
   let file = File::open(&path).unwrap();
   let parquet_reader = SerializedFileReader::new(file).unwrap();
   let metadata = parquet_reader.metadata();
-  print_file_metadata(&mut std::io::stdout(), metadata.file_metadata());
+  print_file_metadata(&mut std::io::stdout(), &metadata.file_metadata());
   println!();
 
   // assign full schema as projected schema
