@@ -133,8 +133,7 @@ impl fmt::Display for Row {
       Row::Bytes(ref value) => write!(f, "{:?}", value.data()),
       Row::Timestamp(value) => write!(f, "{}", value),
       Row::Group(ref fields) => {
-        // Sort keys in ascending order for consistent display
-        write!(f, "[")?;
+        write!(f, "{{")?;
         for (i, &(ref key, ref value)) in fields.iter().enumerate() {
           key.fmt(f)?;
           write!(f, ": ")?;
@@ -143,7 +142,7 @@ impl fmt::Display for Row {
             write!(f, ", ")?;
           }
         }
-        write!(f, "]")
+        write!(f, "}}")
       },
       Row::List(ref fields) => {
         write!(f, "[")?;
@@ -159,7 +158,7 @@ impl fmt::Display for Row {
         write!(f, "{{")?;
         for (i, &(ref key, ref value)) in pairs.iter().enumerate() {
           key.fmt(f)?;
-          write!(f, ": ")?;
+          write!(f, " -> ")?;
           value.fmt(f)?;
           if i < pairs.len() - 1 {
             write!(f, ", ")?;
