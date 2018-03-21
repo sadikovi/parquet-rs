@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 use basic::{Type as PhysicalType, LogicalType};
 use data_type::{ByteArray, Int96};
@@ -35,7 +34,7 @@ pub enum Row {
   Bytes(ByteArray),
   Timestamp(u64), // timestamp with milliseconds
   // Complex types
-  Group(HashMap<String, Row>), // struct type where key is a name of the child element
+  Group(Vec<(String, Row)>), // struct type, child elements are tuples of key-value pairs
   List(Vec<Row>), // list of elements
   Map(Vec<(Row, Row)>) // list of key-value pairs
 }
@@ -120,13 +119,12 @@ impl fmt::Display for Row {
       Row::Timestamp(value) => write!(f, "{}", value),
       Row::Group(ref fields) => {
         // Sort keys in ascending order for consistent display
-        let mut entries: Vec<(&String, &Row)> = fields.iter().collect();
-        entries.sort_unstable_by_key(|&(key, _value)| key);
         write!(f, "[")?;
-        for (i, &(key, value)) in entries.iter().enumerate() {
-          write!(f, "{}: ", key)?;
+        for (i, &(ref key, ref value)) in fields.iter().enumerate() {
+          key.fmt(f)?;
+          write!(f, ": ")?;
           value.fmt(f)?;
-          if i < entries.len() - 1 {
+          if i < fields.len() - 1 {
             write!(f, ", ")?;
           }
         }

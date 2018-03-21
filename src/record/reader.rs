@@ -57,7 +57,7 @@ const BATCH_SIZE: usize = 4;
 pub enum Reader<'a> {
   PrimitiveReader(TypePtr, TripletIter<'a>),
   OptionReader(i16, Box<Reader<'a>>),
-  GroupReader(Option<TypePtr>, Repetition, i16, Vec<Reader<'a>>),
+  GroupReader(Option<TypePtr>, i16, Vec<Reader<'a>>),
   RepeatedReader(TypePtr, i16, i16, Box<Reader<'a>>),
   KeyValueReader(TypePtr, i16, i16, Box<Reader<'a>>, Box<Reader<'a>>)
 }
@@ -88,7 +88,7 @@ impl<'a> Reader<'a> {
 
     // Return group reader for message type, we mark it as always required with
     // definition level 0
-    Reader::GroupReader(None, Repetition::REQUIRED, 0, readers)
+    Reader::GroupReader(None, 0, readers)
   }
 
   pub fn row_iter(
@@ -197,7 +197,7 @@ impl<'a> Reader<'a> {
               curr_def_level, curr_rep_level, paths, row_group_reader);
             readers.push(reader);
           }
-          Reader::GroupReader(Some(field), repetition, curr_def_level, readers)
+          Reader::GroupReader(Some(field), curr_def_level, readers)
         }
       }
     };
@@ -276,15 +276,15 @@ impl<'a> Reader<'a> {
           Row::Null
         }
       },
-      Reader::GroupReader(_, repetition, def_level, ref mut readers) => {
-        let mut fields = HashMap::new();
+      Reader::GroupReader(_, def_level, ref mut readers) => {
+        let mut fields = Vec::new();
         for reader in readers {
-          if repetition != Repetition::OPTIONAL ||
+          if reader.repetition() != Repetition::OPTIONAL ||
               reader.current_def_level() > def_level {
-            fields.insert(String::from(reader.field_name()), reader.read());
+            fields.push((String::from(reader.field_name()), reader.read()));
           } else {
             reader.advance_columns();
-            fields.insert(String::from(reader.field_name()), Row::Null);
+            fields.push((String::from(reader.field_name()), Row::Null));
           }
         }
         Row::Group(fields)
@@ -342,7 +342,7 @@ impl<'a> Reader<'a> {
     match *self {
       Reader::PrimitiveReader(ref field, _) => field.name(),
       Reader::OptionReader(_, ref reader) => reader.field_name(),
-      Reader::GroupReader(ref opt, _, _, _) => match opt {
+      Reader::GroupReader(ref opt, _, _) => match opt {
         &Some(ref field) => field.name(),
         &None => panic!("Field is None for group reader"),
       },
@@ -351,11 +351,32 @@ impl<'a> Reader<'a> {
     }
   }
 
+  fn repetition(&self) -> Repetition {
+    match *self {
+      Reader::PrimitiveReader(ref field, _) => {
+        field.get_basic_info().repetition()
+      },
+      Reader::OptionReader(_, ref reader) => {
+        reader.repetition()
+      },
+      Reader::GroupReader(ref field, _, _) => {
+        assert!(field.is_some(), "Message type does not repetition level");
+        field.as_ref().unwrap().get_basic_info().repetition()
+      },
+      Reader::RepeatedReader(ref field, _, _, _) => {
+        field.get_basic_info().repetition()
+      },
+      Reader::KeyValueReader(ref field, _, _, _, _) => {
+        field.get_basic_info().repetition()
+      }
+    }
+  }
+
   fn has_next(&self) -> bool {
     match *self {
       Reader::PrimitiveReader(_, ref column) => column.has_next(),
       Reader::OptionReader(_, ref reader) => reader.has_next(),
-      Reader::GroupReader(_, _, _, ref readers) => readers.first().unwrap().has_next(),
+      Reader::GroupReader(_, _, ref readers) => readers.first().unwrap().has_next(),
       Reader::RepeatedReader(_, _, _, ref reader) => reader.has_next(),
       Reader::KeyValueReader(_, _, _, ref keys, _) => keys.has_next(),
     }
@@ -365,7 +386,7 @@ impl<'a> Reader<'a> {
     match *self {
       Reader::PrimitiveReader(_, ref column) => column.current_def_level(),
       Reader::OptionReader(_, ref reader) => reader.current_def_level(),
-      Reader::GroupReader(_, _, _, ref readers) => {
+      Reader::GroupReader(_, _, ref readers) => {
         readers.first().unwrap().current_def_level()
       },
       Reader::RepeatedReader(_, _, _, ref reader) => reader.current_def_level(),
@@ -377,7 +398,7 @@ impl<'a> Reader<'a> {
     match *self {
       Reader::PrimitiveReader(_, ref column) => column.current_rep_level(),
       Reader::OptionReader(_, ref reader) => reader.current_rep_level(),
-      Reader::GroupReader(_, _, _, ref readers) => {
+      Reader::GroupReader(_, _, ref readers) => {
         readers.first().unwrap().current_rep_level()
       },
       Reader::RepeatedReader(_, _, _, ref reader) => reader.current_rep_level(),
@@ -393,7 +414,7 @@ impl<'a> Reader<'a> {
       Reader::OptionReader(_, ref mut reader) => {
         reader.advance_columns();
       },
-      Reader::GroupReader(_, _, _, ref mut readers) => {
+      Reader::GroupReader(_, _, ref mut readers) => {
         for reader in readers {
           reader.advance_columns();
         }
