@@ -32,19 +32,25 @@ pub enum Row {
   Double(f64),
   Str(String),
   Bytes(ByteArray),
-  Timestamp(u64), // timestamp with milliseconds
+  Timestamp(u64), // Timestamp with milliseconds
   // Complex types
-  Group(Vec<(String, Row)>), // struct type, child elements are tuples of key-value pairs
-  List(Vec<Row>), // list of elements
-  Map(Vec<(Row, Row)>) // list of key-value pairs
+  Group(Vec<(String, Row)>), // Struct, child elements are tuples of field-value pairs
+  List(Vec<Row>), // List of elements
+  Map(Vec<(Row, Row)>) // List of key-value pairs
 }
 
 impl Row {
-  pub fn new_bool(value: bool) -> Self {
+  /// Converts BOOLEAN into boolean value.
+  pub fn new_bool(
+    _physical_type: PhysicalType, _logical_type: LogicalType, value: bool
+  ) -> Self {
     Row::Bool(value)
   }
 
-  pub fn new_int32(logical_type: LogicalType, value: i32) -> Self {
+  // Converts INT32 into integer value.
+  pub fn new_int32(
+    _physical_type: PhysicalType, logical_type: LogicalType, value: i32
+  ) -> Self {
     match logical_type {
       LogicalType::INT_8 => Row::Byte(value as i8),
       LogicalType::INT_16 => Row::Short(value as i16),
@@ -53,16 +59,20 @@ impl Row {
     }
   }
 
-  pub fn new_int64(logical_type: LogicalType, value: i64) -> Self {
+  /// Converts INT64 into long value.
+  pub fn new_int64(
+    _physical_type: PhysicalType, logical_type: LogicalType, value: i64
+  ) -> Self {
     match logical_type {
       LogicalType::INT_64 | LogicalType::NONE => Row::Long(value),
       _ => unimplemented!()
     }
   }
 
-  pub fn new_int96(value: Int96) -> Self {
-    // Converts nanosecond timestamps stored as INT96 into internal milliseconds
-
+  /// Converts nanosecond timestamps stored as INT96 into milliseconds
+  pub fn new_int96(
+    _physical_type: PhysicalType, _logical_type: LogicalType, value: Int96
+  ) -> Self {
     let julian_to_unix_epoch_days: u64 = 2_440_588;
     let milli_seconds_in_a_day: u64 = 86_400_000;
     let nano_seconds_in_a_day: u64 = milli_seconds_in_a_day * 1_000_000;
@@ -75,18 +85,23 @@ impl Row {
     Row::Timestamp(millis)
   }
 
-  pub fn new_float(value: f32) -> Self {
+  /// Converts FLOAT into float value.
+  pub fn new_float(
+    _physical_type: PhysicalType, _logical_type: LogicalType, value: f32
+  ) -> Self {
     Row::Float(value)
   }
 
-  pub fn new_double(value: f64) -> Self {
+  /// Converts DOUBLE into double value.
+  pub fn new_double(
+    _physical_type: PhysicalType, _logical_type: LogicalType, value: f64
+  ) -> Self {
     Row::Double(value)
   }
 
+  /// Converts BYTE_ARRAY into either UTF8 string or array of bytes.
   pub fn new_byte_array(
-    physical_type: PhysicalType,
-    logical_type: LogicalType,
-    value: ByteArray
+    physical_type: PhysicalType, logical_type: LogicalType, value: ByteArray
   ) -> Self {
     match physical_type {
       PhysicalType::BYTE_ARRAY => {
