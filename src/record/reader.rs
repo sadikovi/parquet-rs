@@ -86,8 +86,8 @@ impl<'a> Reader<'a> {
       readers.push(reader);
     }
 
-    // Return group reader for message type, we mark it as always required with
-    // definition level 0
+    // Return group reader for message type,
+    // it is always required with definition level 0
     Reader::GroupReader(None, 0, readers)
   }
 
