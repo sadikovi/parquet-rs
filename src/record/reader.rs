@@ -265,7 +265,7 @@ impl<'a> Reader<'a> {
     match *self {
       Reader::PrimitiveReader(_, ref mut column) => {
         let value = column.current_value();
-        column.consume().unwrap();
+        column.read_next().unwrap();
         value
       },
       Reader::OptionReader(def_level, ref mut reader) => {
@@ -409,7 +409,7 @@ impl<'a> Reader<'a> {
   fn advance_columns(&mut self) {
     match *self {
       Reader::PrimitiveReader(_, ref mut column) => {
-        column.consume().unwrap();
+        column.read_next().unwrap();
       },
       Reader::OptionReader(_, ref mut reader) => {
         reader.advance_columns();

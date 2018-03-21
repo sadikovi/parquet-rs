@@ -36,7 +36,7 @@ pub enum TripletIter<'a> {
 }
 
 impl<'a> TripletIter<'a> {
-  /// Creates new column vector for column reader
+  /// Creates new triplet for column reader
   pub fn new(descr: ColumnDescPtr, reader: ColumnReader<'a>, batch_size: usize) -> Self {
     match descr.physical_type() {
       PhysicalType::BOOLEAN => {
@@ -74,24 +74,25 @@ impl<'a> TripletIter<'a> {
     }
   }
 
-  /// Invokes underlying typed column vector to buffer current value.
+  /// Invokes underlying typed triplet iterator to buffer current value.
   /// Should be called once - either before `is_null` or `update_value`.
-  pub fn consume(&mut self) -> Result<bool> {
+  pub fn read_next(&mut self) -> Result<bool> {
     match *self {
-      TripletIter::BoolTripletIter(ref mut typed) => typed.consume(),
-      TripletIter::Int32TripletIter(ref mut typed) => typed.consume(),
-      TripletIter::Int64TripletIter(ref mut typed) => typed.consume(),
-      TripletIter::Int96TripletIter(ref mut typed) => typed.consume(),
-      TripletIter::FloatTripletIter(ref mut typed) => typed.consume(),
-      TripletIter::DoubleTripletIter(ref mut typed) => typed.consume(),
-      TripletIter::ByteArrayTripletIter(ref mut typed) => typed.consume(),
-      TripletIter::FixedLenByteArrayTripletIter(ref mut typed) => typed.consume()
+      TripletIter::BoolTripletIter(ref mut typed) => typed.read_next(),
+      TripletIter::Int32TripletIter(ref mut typed) => typed.read_next(),
+      TripletIter::Int64TripletIter(ref mut typed) => typed.read_next(),
+      TripletIter::Int96TripletIter(ref mut typed) => typed.read_next(),
+      TripletIter::FloatTripletIter(ref mut typed) => typed.read_next(),
+      TripletIter::DoubleTripletIter(ref mut typed) => typed.read_next(),
+      TripletIter::ByteArrayTripletIter(ref mut typed) => typed.read_next(),
+      TripletIter::FixedLenByteArrayTripletIter(ref mut typed) => typed.read_next()
     }
   }
 
-  /// Provides check on values/levels left without invoking the underlying column reader.
+  /// Provides check on values/levels left without invoking the underlying typed triplet
+  /// iterator.
   /// Returns true if more values/levels exist, false otherwise.
-  /// It is always in sync with `consume` method.
+  /// It is always in sync with `read_next` method.
   pub fn has_next(&self) -> bool {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.has_next(),
@@ -105,7 +106,7 @@ impl<'a> TripletIter<'a> {
     }
   }
 
-  /// Returns current definition level for a leaf vector
+  /// Returns current definition level for a leaf triplet iterator
   pub fn current_def_level(&self) -> i16 {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.current_def_level(),
@@ -119,7 +120,7 @@ impl<'a> TripletIter<'a> {
     }
   }
 
-  /// Returns max definition level for a leaf vector
+  /// Returns max definition level for a leaf triplet iterator
   pub fn max_def_level(&self) -> i16 {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.max_def_level(),
@@ -133,7 +134,7 @@ impl<'a> TripletIter<'a> {
     }
   }
 
-  /// Returns current repetition level for a leaf vector
+  /// Returns current repetition level for a leaf triplet iterator
   pub fn current_rep_level(&self) -> i16 {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.current_rep_level(),
@@ -147,7 +148,7 @@ impl<'a> TripletIter<'a> {
     }
   }
 
-  /// Returns max repetition level for a leaf vector
+  /// Returns max repetition level for a leaf triplet iterator
   pub fn max_rep_level(&self) -> i16 {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.max_rep_level(),
@@ -202,8 +203,8 @@ impl<'a> TripletIter<'a> {
   }
 }
 
-/// Internal column vector as a wrapper for column reader (primitive leaf column).
-/// Provides per-element access.
+/// Internal typed triplet iterator as a wrapper for column reader
+/// (primitive leaf column), provides per-element access.
 pub struct TypedTripletIter<'a, T: DataType> {
   reader: ColumnReaderImpl<'a, T>,
   physical_type: PhysicalType,
@@ -225,9 +226,13 @@ pub struct TypedTripletIter<'a, T: DataType> {
 }
 
 impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
-  /// Creates new typed column vector based on provided column reader.
+  /// Creates new typed triplet iterator based on provided column reader.
   /// Use batch size to specify the amount of values to buffer from column reader.
-  fn new(descr: ColumnDescPtr, batch_size: usize, column_reader: ColumnReader<'a>) -> Self {
+  fn new(
+    descr: ColumnDescPtr,
+    batch_size: usize,
+    column_reader: ColumnReader<'a>
+  ) -> Self {
     assert!(batch_size > 0, "Expected positive batch size, found: {}", batch_size);
 
     let max_def_level = descr.max_def_level();
@@ -252,26 +257,29 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
     }
   }
 
-  /// Returns physical type for the current column vector.
+  /// Returns physical type for the current typed triplet iterator.
   pub fn physical_type(&self) -> PhysicalType {
     self.physical_type
   }
 
-  /// Returns logical type for the current column vector.
+  /// Returns logical type for the current typed triplet iterator.
   pub fn logical_type(&self) -> LogicalType {
     self.logical_type
   }
 
+  /// Returns maximum definition level for the triplet iterator (leaf column).
   fn max_def_level(&self) -> i16 {
     self.max_def_level
   }
 
+  /// Returns maximum repetition level for the triplet iterator (leaf column).
   fn max_rep_level(&self) -> i16 {
     self.max_rep_level
   }
 
+  /// Returns current value.
+  /// Method does not advance the iterator, therefore can be called multiple times.
   fn current_value(&self) -> &T::T {
-    // We might want to remove this check because column vector would check that anyway
     assert!(
       self.current_def_level() == self.max_def_level(),
       "Cannot extract value, max definition level: {}, current level: {}",
@@ -280,6 +288,8 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
     &self.values[self.curr_triplet_index]
   }
 
+  /// Returns current definition level.
+  /// If field is required, then maximum definition level is returned.
   fn current_def_level(&self) -> i16 {
     match self.def_levels {
       Some(ref vec) => vec[self.curr_triplet_index],
@@ -287,6 +297,8 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
     }
   }
 
+  /// Returns current repetition level.
+  /// If field is required, then maximum repetition level is returned.
   fn current_rep_level(&self) -> i16 {
     match self.rep_levels {
       Some(ref vec) => vec[self.curr_triplet_index],
@@ -294,9 +306,9 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
     }
   }
 
-  /// Consumes and advances to the next triplet.
+  /// Advances to the next triplet.
   /// Returns true, if there are more records to read, false there are no records left.
-  fn consume(&mut self) -> Result<bool> {
+  fn read_next(&mut self) -> Result<bool> {
     self.curr_triplet_index += 1;
 
     if self.curr_triplet_index >= self.triplets_left {
@@ -313,7 +325,7 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
           None => None
         };
 
-        // buffer triplets
+        // Buffer triplets
         self.reader.read_batch(
           self.batch_size,
           def_levels,
@@ -330,16 +342,21 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
 
       // We never read values more than levels
       if levels_read == 0 || values_read == levels_read {
-        // no definition levels read, column is required
+        // There are no definition levels to read, column is required
         // or definition levels match values, so it does not require spacing
         self.curr_triplet_index = 0;
         self.triplets_left = values_read;
       } else if values_read < levels_read {
-        // add spacing for triplets
-        // if values_read == 0, then spacing will not be triggered
+        // Add spacing for triplets.
+        // The idea is setting values for positions in def_levels when current definition
+        // level equals to maximum definition level. Values and levels are guaranteed to
+        // line up, because of the column reader method.
+
+        // Note: if values_read == 0, then spacing will not be triggered
         let mut idx = values_read;
+        let def_levels = self.def_levels.as_ref().unwrap();
         for i in 0..levels_read {
-          if self.def_levels.as_ref().unwrap()[levels_read - i - 1] == self.max_def_level {
+          if def_levels[levels_read - i - 1] == self.max_def_level {
             idx -= 1; // This is done to avoid usize becoming a negative value
             self.values.swap(levels_read - i - 1, idx);
           }
@@ -359,7 +376,7 @@ impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
   }
 
   /// Quick check if iterator has more values/levels to read.
-  /// It is updated as a result of `consume` method, so they are synchronized.
+  /// It is updated as a result of `read_next` method, so they are synchronized.
   fn has_next(&self) -> bool {
     self.has_next
   }
