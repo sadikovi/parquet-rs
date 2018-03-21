@@ -67,7 +67,7 @@ impl<'a> Reader<'a> {
     descr: SchemaDescPtr,
     row_group_reader: &'a RowGroupReader
   ) -> Self {
-    // prepare map of column paths for pruning
+    // Prepare map of column paths for pruning
     let mut paths: HashMap<ColumnPath, usize> = HashMap::new();
     let row_group_metadata = row_group_reader.metadata();
 
@@ -139,8 +139,8 @@ impl<'a> Reader<'a> {
           assert_eq!(repeated_field.get_basic_info().repetition(),
             Repetition::REPEATED, "Invalid list type {:?}", field);
 
-          // Support for backward compatible lists
           if Self::is_element_type(&repeated_field) {
+            // Support for backward compatible lists
             let reader = Self::reader_tree(repeated_field.clone(), &mut path,
               curr_def_level, curr_rep_level, paths, row_group_reader);
 
@@ -208,6 +208,7 @@ impl<'a> Reader<'a> {
 
   // == Value readers API ==
 
+  /// Wraps reader in option reader based on repetition.
   fn option(repetition: Repetition, def_level: i16, reader: Reader<'a>) -> Self {
     if repetition == Repetition::OPTIONAL {
       Reader::OptionReader(def_level - 1, Box::new(reader))
@@ -217,6 +218,7 @@ impl<'a> Reader<'a> {
   }
 
   /// Returns true if repeated type is an element type for the list.
+  /// Used to determine legacy list types.
   /// This method is copied from Spark Parquet reader.
   fn is_element_type(repeated_type: &Type) -> bool {
     // For legacy 2-level list types with primitive element type, e.g.:
@@ -262,6 +264,8 @@ impl<'a> Reader<'a> {
     repeated_type.name().ends_with("_tuple")
   }
 
+  /// Reads current record as `Row` from the reader tree.
+  /// Automatically advances all necessary readers.
   fn read(&mut self) -> Row {
     match *self {
       Reader::PrimitiveReader(_, ref mut column) => {
@@ -303,7 +307,7 @@ impl<'a> Reader<'a> {
             break;
           }
 
-          // this covers case when we are out of repetition levels and should close the
+          // This covers case when we are out of repetition levels and should close the
           // group, or there are no values left to buffer.
           if !reader.has_next() || reader.current_rep_level() <= rep_level {
             break;
@@ -321,13 +325,13 @@ impl<'a> Reader<'a> {
           } else {
             keys.advance_columns();
             values.advance_columns();
-            // if the current definition level is equal to the definition level of this
+            // If the current definition level is equal to the definition level of this
             // repeated type, then the result is an empty list and the repetition level
             // will always be <= rl.
             break;
           }
 
-          // this covers case when we are out of repetition levels and should close the
+          // This covers case when we are out of repetition levels and should close the
           // group, or there are no values left to buffer.
           if !keys.has_next() || keys.current_rep_level() <= rep_level {
             break;
@@ -362,9 +366,9 @@ impl<'a> Reader<'a> {
       Reader::OptionReader(_, ref reader) => {
         reader.repetition()
       },
-      Reader::GroupReader(ref field, _, _) => {
-        assert!(field.is_some(), "Message type does not repetition level");
-        field.as_ref().unwrap().get_basic_info().repetition()
+      Reader::GroupReader(ref opt, _, _) => match opt {
+        &Some(ref field) => field.get_basic_info().repetition(),
+        &None => panic!("Field is None for group reader"),
       },
       Reader::RepeatedReader(ref field, _, _, _) => {
         field.get_basic_info().repetition()
