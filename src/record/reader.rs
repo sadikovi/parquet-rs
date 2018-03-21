@@ -216,7 +216,8 @@ impl<'a> Reader<'a> {
     }
   }
 
-  /// Returns true if repeated type is an element type for the list
+  /// Returns true if repeated type is an element type for the list.
+  /// This method is copied from Spark Parquet reader.
   fn is_element_type(repeated_type: &Type) -> bool {
     // For legacy 2-level list types with primitive element type, e.g.:
     //
@@ -338,6 +339,7 @@ impl<'a> Reader<'a> {
     }
   }
 
+  /// Returns field name for the current reader.
   fn field_name(&self) -> &str {
     match *self {
       Reader::PrimitiveReader(ref field, _) => field.name(),
@@ -351,6 +353,7 @@ impl<'a> Reader<'a> {
     }
   }
 
+  /// Returns repetition for the current reader.
   fn repetition(&self) -> Repetition {
     match *self {
       Reader::PrimitiveReader(ref field, _) => {
@@ -372,6 +375,8 @@ impl<'a> Reader<'a> {
     }
   }
 
+  /// Returns true, if current reader has more values, false otherwise.
+  /// Method does not advance internal iterator.
   fn has_next(&self) -> bool {
     match *self {
       Reader::PrimitiveReader(_, ref column) => column.has_next(),
@@ -382,6 +387,8 @@ impl<'a> Reader<'a> {
     }
   }
 
+  /// Returns current definition level,
+  /// Method does not advance internal iterator.
   fn current_def_level(&self) -> i16 {
     match *self {
       Reader::PrimitiveReader(_, ref column) => column.current_def_level(),
@@ -394,6 +401,8 @@ impl<'a> Reader<'a> {
     }
   }
 
+  /// Returns current repetition level.
+  /// Method does not advance internal iterator.
   fn current_rep_level(&self) -> i16 {
     match *self {
       Reader::PrimitiveReader(_, ref column) => column.current_rep_level(),
@@ -406,6 +415,7 @@ impl<'a> Reader<'a> {
     }
   }
 
+  /// Advances leaf columns for the current reader.
   fn advance_columns(&mut self) {
     match *self {
       Reader::PrimitiveReader(_, ref mut column) => {
