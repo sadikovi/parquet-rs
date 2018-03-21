@@ -19,6 +19,8 @@ use std::fmt;
 use basic::{Type as PhysicalType, LogicalType};
 use data_type::{ByteArray, Int96};
 
+/// Row API to represent nested Parquet record.
+/// Use implementation methods to update how Parquet types are mapped to Row.
 #[derive(Clone, Debug)]
 pub enum Row {
   // Primitive types
@@ -41,14 +43,14 @@ pub enum Row {
 
 impl Row {
   /// Converts BOOLEAN into boolean value.
-  pub fn new_bool(
+  pub fn convert_bool(
     _physical_type: PhysicalType, _logical_type: LogicalType, value: bool
   ) -> Self {
     Row::Bool(value)
   }
 
   // Converts INT32 into integer value.
-  pub fn new_int32(
+  pub fn convert_int32(
     _physical_type: PhysicalType, logical_type: LogicalType, value: i32
   ) -> Self {
     match logical_type {
@@ -60,7 +62,7 @@ impl Row {
   }
 
   /// Converts INT64 into long value.
-  pub fn new_int64(
+  pub fn convert_int64(
     _physical_type: PhysicalType, logical_type: LogicalType, value: i64
   ) -> Self {
     match logical_type {
@@ -70,7 +72,7 @@ impl Row {
   }
 
   /// Converts nanosecond timestamps stored as INT96 into milliseconds
-  pub fn new_int96(
+  pub fn convert_int96(
     _physical_type: PhysicalType, _logical_type: LogicalType, value: Int96
   ) -> Self {
     let julian_to_unix_epoch_days: u64 = 2_440_588;
@@ -86,21 +88,21 @@ impl Row {
   }
 
   /// Converts FLOAT into float value.
-  pub fn new_float(
+  pub fn convert_float(
     _physical_type: PhysicalType, _logical_type: LogicalType, value: f32
   ) -> Self {
     Row::Float(value)
   }
 
   /// Converts DOUBLE into double value.
-  pub fn new_double(
+  pub fn convert_double(
     _physical_type: PhysicalType, _logical_type: LogicalType, value: f64
   ) -> Self {
     Row::Double(value)
   }
 
   /// Converts BYTE_ARRAY into either UTF8 string or array of bytes.
-  pub fn new_byte_array(
+  pub fn convert_byte_array(
     physical_type: PhysicalType, logical_type: LogicalType, value: ByteArray
   ) -> Self {
     match physical_type {

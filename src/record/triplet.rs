@@ -174,35 +174,35 @@ impl<'a> TripletIter<'a> {
     assert!(!self.is_null(), "Value is null");
     match *self {
       TripletIter::BoolTripletIter(ref typed) => {
-        Row::new_bool(
+        Row::convert_bool(
           typed.physical_type(), typed.logical_type(), *typed.current_value())
       },
       TripletIter::Int32TripletIter(ref typed) => {
-        Row::new_int32(
+        Row::convert_int32(
           typed.physical_type(), typed.logical_type(), *typed.current_value())
       },
       TripletIter::Int64TripletIter(ref typed) => {
-        Row::new_int64(
+        Row::convert_int64(
           typed.physical_type(), typed.logical_type(), *typed.current_value())
       },
       TripletIter::Int96TripletIter(ref typed) => {
-        Row::new_int96(
+        Row::convert_int96(
           typed.physical_type(), typed.logical_type(), typed.current_value().clone())
       },
       TripletIter::FloatTripletIter(ref typed) => {
-        Row::new_float(
+        Row::convert_float(
           typed.physical_type(), typed.logical_type(), *typed.current_value())
       },
       TripletIter::DoubleTripletIter(ref typed) => {
-        Row::new_double(
+        Row::convert_double(
           typed.physical_type(), typed.logical_type(), *typed.current_value())
       },
       TripletIter::ByteArrayTripletIter(ref typed) => {
-        Row::new_byte_array(
+        Row::convert_byte_array(
           typed.physical_type(), typed.logical_type(), typed.current_value().clone())
       },
       TripletIter::FixedLenByteArrayTripletIter(ref typed) => {
-        Row::new_byte_array(
+        Row::convert_byte_array(
           typed.physical_type(), typed.logical_type(), typed.current_value().clone())
       }
     }
