@@ -76,6 +76,7 @@ impl TripletIter {
 
   /// Invokes underlying typed triplet iterator to buffer current value.
   /// Should be called once - either before `is_null` or `update_value`.
+  #[inline]
   pub fn read_next(&mut self) -> Result<bool> {
     match *self {
       TripletIter::BoolTripletIter(ref mut typed) => typed.read_next(),
@@ -93,6 +94,7 @@ impl TripletIter {
   /// iterator.
   /// Returns true if more values/levels exist, false otherwise.
   /// It is always in sync with `read_next` method.
+  #[inline]
   pub fn has_next(&self) -> bool {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.has_next(),
@@ -107,6 +109,7 @@ impl TripletIter {
   }
 
   /// Returns current definition level for a leaf triplet iterator
+  #[inline]
   pub fn current_def_level(&self) -> i16 {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.current_def_level(),
@@ -121,6 +124,7 @@ impl TripletIter {
   }
 
   /// Returns max definition level for a leaf triplet iterator
+  #[inline]
   pub fn max_def_level(&self) -> i16 {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.max_def_level(),
@@ -135,6 +139,7 @@ impl TripletIter {
   }
 
   /// Returns current repetition level for a leaf triplet iterator
+  #[inline]
   pub fn current_rep_level(&self) -> i16 {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.current_rep_level(),
@@ -149,6 +154,7 @@ impl TripletIter {
   }
 
   /// Returns max repetition level for a leaf triplet iterator
+  #[inline]
   pub fn max_rep_level(&self) -> i16 {
     match *self {
       TripletIter::BoolTripletIter(ref typed) => typed.max_rep_level(),
@@ -165,6 +171,7 @@ impl TripletIter {
   /// Returns true, if current value is null.
   /// Based on the fact that for non-null value current definition level
   /// equals to max definition level.
+  #[inline]
   pub fn is_null(&self) -> bool {
     self.current_def_level() < self.max_def_level()
   }
@@ -264,27 +271,32 @@ impl<T: DataType> TypedTripletIter<T> where T: 'static {
   }
 
   /// Returns physical type for the current typed triplet iterator.
+  #[inline]
   pub fn physical_type(&self) -> PhysicalType {
     self.physical_type
   }
 
   /// Returns logical type for the current typed triplet iterator.
+  #[inline]
   pub fn logical_type(&self) -> LogicalType {
     self.logical_type
   }
 
   /// Returns maximum definition level for the triplet iterator (leaf column).
+  #[inline]
   fn max_def_level(&self) -> i16 {
     self.max_def_level
   }
 
   /// Returns maximum repetition level for the triplet iterator (leaf column).
+  #[inline]
   fn max_rep_level(&self) -> i16 {
     self.max_rep_level
   }
 
   /// Returns current value.
   /// Method does not advance the iterator, therefore can be called multiple times.
+  #[inline]
   fn current_value(&self) -> &T::T {
     assert!(
       self.current_def_level() == self.max_def_level(),
@@ -296,6 +308,7 @@ impl<T: DataType> TypedTripletIter<T> where T: 'static {
 
   /// Returns current definition level.
   /// If field is required, then maximum definition level is returned.
+  #[inline]
   fn current_def_level(&self) -> i16 {
     match self.def_levels {
       Some(ref vec) => vec[self.curr_triplet_index],
@@ -305,11 +318,19 @@ impl<T: DataType> TypedTripletIter<T> where T: 'static {
 
   /// Returns current repetition level.
   /// If field is required, then maximum repetition level is returned.
+  #[inline]
   fn current_rep_level(&self) -> i16 {
     match self.rep_levels {
       Some(ref vec) => vec[self.curr_triplet_index],
       None => self.max_rep_level
     }
+  }
+
+  /// Quick check if iterator has more values/levels to read.
+  /// It is updated as a result of `read_next` method, so they are synchronized.
+  #[inline]
+  fn has_next(&self) -> bool {
+    self.has_next
   }
 
   /// Advances to the next triplet.
@@ -379,11 +400,5 @@ impl<T: DataType> TypedTripletIter<T> where T: 'static {
 
     self.has_next = true;
     Ok(true)
-  }
-
-  /// Quick check if iterator has more values/levels to read.
-  /// It is updated as a result of `read_next` method, so they are synchronized.
-  fn has_next(&self) -> bool {
-    self.has_next
   }
 }
