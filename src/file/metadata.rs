@@ -92,6 +92,10 @@ impl FileMetaData {
   pub fn schema_descr(&self) -> &SchemaDescriptor {
     &self.schema_descr
   }
+
+  pub fn schema_descr_ptr(&self) -> SchemaDescPtr {
+    self.schema_descr.clone()
+  }
 }
 
 pub type RowGroupMetaDataPtr = Rc<RowGroupMetaData>;

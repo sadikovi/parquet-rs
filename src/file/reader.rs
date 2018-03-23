@@ -53,7 +53,7 @@ pub trait FileReader {
   fn get_row_group(&self, i: usize) -> Result<Box<RowGroupReader>>;
 
   /// Get full iterator of `Row` from a file (over all row groups)
-  fn get_row_iter(&self, projection: SchemaType) -> Result<FileRowIter>;
+  fn get_row_iter(&self, projection: Option<SchemaType>) -> Result<FileRowIter>;
 }
 
 /// Parquet row group reader API. With this, user can get metadata information about the
@@ -182,15 +182,24 @@ impl FileReader for SerializedFileReader {
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
 
-  fn get_row_iter(&self, projection: SchemaType) -> Result<FileRowIter> {
-    // check if projection is part of file schema
+  fn get_row_iter(&self, projection: Option<SchemaType>) -> Result<FileRowIter> {
     let file_metadata = self.metadata().file_metadata();
-    let root_schema = file_metadata.schema_descr().root_schema();
-    if !root_schema.check_contains(&projection) {
-      return Err(general_err!("Root schema does not contain projection"));
-    }
 
-    let proj_descr = Rc::new(SchemaDescriptor::new(Rc::new(projection)));
+    // Resolve projected schema (either full file schema or a subset)
+    let proj_descr = match projection {
+      Some(projection) => {
+        // check if projection is part of file schema
+        let root_schema = file_metadata.schema_descr().root_schema();
+        if !root_schema.check_contains(&projection) {
+          return Err(general_err!("Root schema does not contain projection"));
+        }
+        Rc::new(SchemaDescriptor::new(Rc::new(projection)))
+      },
+      None => {
+        file_metadata.schema_descr_ptr()
+      }
+    };
+
     Ok(FileRowIter::new(proj_descr, self))
   }
 }
