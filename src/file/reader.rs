@@ -30,7 +30,7 @@ use schema::types::{self, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
-use record::reader::{Reader as RecordReader, RowIter};
+use record::reader::{FileRowIter, Reader as RecordReader, RowIter};
 use util::io::FileChunk;
 use util::memory::ByteBufferPtr;
 
@@ -52,8 +52,8 @@ pub trait FileReader {
   /// may outlive the file reader.
   fn get_row_group(&self, i: usize) -> Result<Box<RowGroupReader>>;
 
-  /// Method to read all data, e.g. from the file
-  fn read_data(&self, projection: SchemaType, num_records: Option<usize>);
+  /// Get full iterator of `Row` from a file (over all row groups)
+  fn get_row_iter(&self, projection: SchemaType) -> Result<FileRowIter>;
 }
 
 /// Parquet row group reader API. With this, user can get metadata information about the
@@ -182,37 +182,16 @@ impl FileReader for SerializedFileReader {
     Ok(Box::new(SerializedRowGroupReader::new(f, row_group_metadata)))
   }
 
-  fn read_data(&self, projection: SchemaType, num_records: Option<usize>) {
+  fn get_row_iter(&self, projection: SchemaType) -> Result<FileRowIter> {
     // check if projection is part of file schema
     let file_metadata = self.metadata().file_metadata();
     let root_schema = file_metadata.schema_descr().root_schema();
     if !root_schema.check_contains(&projection) {
-      // return an error instead
-      panic!("Root schema does not contain projection");
+      return Err(general_err!("Root schema does not contain projection"));
     }
 
     let proj_descr = Rc::new(SchemaDescriptor::new(Rc::new(projection)));
-
-    let read_all_records = num_records.is_none();
-    let mut num_records = num_records.unwrap_or(0);
-    let num_row_groups = self.num_row_groups();
-    let mut curr_row_group = 0;
-
-    while (read_all_records || num_records > 0) && curr_row_group < num_row_groups {
-      let row_group_reader = self.get_row_group(curr_row_group).unwrap();
-      curr_row_group += 1;
-
-      let mut iter = row_group_reader.get_row_iter(proj_descr.clone());
-      while let Some(row) = iter.next() {
-        println!("{}", row);
-        if !read_all_records {
-          num_records -= 1;
-          if num_records == 0 {
-            return;
-          }
-        }
-      }
-    }
+    Ok(FileRowIter::new(proj_descr, self))
   }
 }
 

@@ -24,20 +24,20 @@ use schema::types::ColumnDescPtr;
 
 /// High level API wrapper on column reader.
 /// Provides per-element access for each primitive column.
-pub enum TripletIter<'a> {
-  BoolTripletIter(TypedTripletIter<'a, BoolType>),
-  Int32TripletIter(TypedTripletIter<'a, Int32Type>),
-  Int64TripletIter(TypedTripletIter<'a, Int64Type>),
-  Int96TripletIter(TypedTripletIter<'a, Int96Type>),
-  FloatTripletIter(TypedTripletIter<'a, FloatType>),
-  DoubleTripletIter(TypedTripletIter<'a, DoubleType>),
-  ByteArrayTripletIter(TypedTripletIter<'a, ByteArrayType>),
-  FixedLenByteArrayTripletIter(TypedTripletIter<'a, FixedLenByteArrayType>)
+pub enum TripletIter {
+  BoolTripletIter(TypedTripletIter<BoolType>),
+  Int32TripletIter(TypedTripletIter<Int32Type>),
+  Int64TripletIter(TypedTripletIter<Int64Type>),
+  Int96TripletIter(TypedTripletIter<Int96Type>),
+  FloatTripletIter(TypedTripletIter<FloatType>),
+  DoubleTripletIter(TypedTripletIter<DoubleType>),
+  ByteArrayTripletIter(TypedTripletIter<ByteArrayType>),
+  FixedLenByteArrayTripletIter(TypedTripletIter<FixedLenByteArrayType>)
 }
 
-impl<'a> TripletIter<'a> {
+impl TripletIter {
   /// Creates new triplet for column reader
-  pub fn new(descr: ColumnDescPtr, reader: ColumnReader<'a>, batch_size: usize) -> Self {
+  pub fn new(descr: ColumnDescPtr, reader: ColumnReader, batch_size: usize) -> Self {
     match descr.physical_type() {
       PhysicalType::BOOLEAN => {
         TripletIter::BoolTripletIter(
@@ -211,8 +211,8 @@ impl<'a> TripletIter<'a> {
 
 /// Internal typed triplet iterator as a wrapper for column reader
 /// (primitive leaf column), provides per-element access.
-pub struct TypedTripletIter<'a, T: DataType> {
-  reader: ColumnReaderImpl<'a, T>,
+pub struct TypedTripletIter<T: DataType> {
+  reader: ColumnReaderImpl<T>,
   physical_type: PhysicalType,
   logical_type: LogicalType,
   batch_size: usize,
@@ -231,13 +231,13 @@ pub struct TypedTripletIter<'a, T: DataType> {
   has_next: bool
 }
 
-impl<'a, T: DataType> TypedTripletIter<'a, T> where T: 'static {
+impl<T: DataType> TypedTripletIter<T> where T: 'static {
   /// Creates new typed triplet iterator based on provided column reader.
   /// Use batch size to specify the amount of values to buffer from column reader.
   fn new(
     descr: ColumnDescPtr,
     batch_size: usize,
-    column_reader: ColumnReader<'a>
+    column_reader: ColumnReader
   ) -> Self {
     assert!(batch_size > 0, "Expected positive batch size, found: {}", batch_size);
 

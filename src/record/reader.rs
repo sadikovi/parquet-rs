@@ -17,26 +17,69 @@
 
 use std::collections::HashMap;
 use basic::{LogicalType, Repetition};
-use file::reader::RowGroupReader;
+use file::reader::{FileReader, RowGroupReader};
 use schema::types::{ColumnPath, SchemaDescPtr, Type, TypePtr};
 use record::api::Row;
 use record::triplet::TripletIter;
 
+pub struct FileRowIter<'a> {
+  descr: SchemaDescPtr,
+  file_reader: &'a FileReader,
+  curr_row_group: usize,
+  num_row_groups: usize,
+  iter: Option<RowIter>
+}
+
+impl<'a> FileRowIter<'a> {
+  pub fn new(descr: SchemaDescPtr, file_reader: &'a FileReader) -> Self {
+    let num_row_groups = file_reader.num_row_groups();
+
+    Self {
+      descr: descr,
+      file_reader: file_reader,
+      curr_row_group: 0,
+      num_row_groups: num_row_groups,
+      iter: None
+    }
+  }
+}
+
+impl<'a> Iterator for FileRowIter<'a> {
+  type Item = Row;
+
+  fn next(&mut self) -> Option<Row> {
+    let mut row = None;
+    if let Some(ref mut iter) = self.iter {
+      row = iter.next();
+    }
+
+    while row.is_none() && self.curr_row_group < self.num_row_groups {
+      let row_group_reader = self.file_reader.get_row_group(self.curr_row_group).unwrap();
+      self.curr_row_group += 1;
+      let mut iter = row_group_reader.get_row_iter(self.descr.clone());
+      row = iter.next();
+      self.iter = Some(iter);
+    }
+
+    row
+  }
+}
+
 /// Iterator of Rows
-pub struct RowIter<'a> {
-  root_reader: Reader<'a>,
+pub struct RowIter {
+  root_reader: Reader,
   records_left: usize
 }
 
-impl<'a> RowIter<'a> {
-  fn new(mut root_reader: Reader<'a>, num_records: usize) -> Self {
+impl RowIter {
+  fn new(mut root_reader: Reader, num_records: usize) -> Self {
     // Prepare root reader by advancing all column vectors
     root_reader.advance_columns();
     Self { root_reader: root_reader, records_left: num_records }
   }
 }
 
-impl<'a> Iterator for RowIter<'a> {
+impl Iterator for RowIter {
   type Item = Row;
 
   fn next(&mut self) -> Option<Row> {
@@ -54,18 +97,18 @@ impl<'a> Iterator for RowIter<'a> {
 const BATCH_SIZE: usize = 4;
 
 /// Reader tree for record assembly
-pub enum Reader<'a> {
-  PrimitiveReader(TypePtr, TripletIter<'a>),
-  OptionReader(i16, Box<Reader<'a>>),
-  GroupReader(Option<TypePtr>, i16, Vec<Reader<'a>>),
-  RepeatedReader(TypePtr, i16, i16, Box<Reader<'a>>),
-  KeyValueReader(TypePtr, i16, i16, Box<Reader<'a>>, Box<Reader<'a>>)
+pub enum Reader {
+  PrimitiveReader(TypePtr, TripletIter),
+  OptionReader(i16, Box<Reader>),
+  GroupReader(Option<TypePtr>, i16, Vec<Reader>),
+  RepeatedReader(TypePtr, i16, i16, Box<Reader>),
+  KeyValueReader(TypePtr, i16, i16, Box<Reader>, Box<Reader>)
 }
 
-impl<'a> Reader<'a> {
+impl Reader {
   pub fn new(
     descr: SchemaDescPtr,
-    row_group_reader: &'a RowGroupReader
+    row_group_reader: &RowGroupReader
   ) -> Self {
     // Prepare map of column paths for pruning
     let mut paths: HashMap<ColumnPath, usize> = HashMap::new();
@@ -93,8 +136,8 @@ impl<'a> Reader<'a> {
 
   pub fn row_iter(
     descr: SchemaDescPtr,
-    row_group_reader: &'a RowGroupReader
-  ) -> RowIter<'a> {
+    row_group_reader: &RowGroupReader
+  ) -> RowIter {
     let num_records = row_group_reader.metadata().num_rows() as usize;
     RowIter::new(Self::new(descr, row_group_reader), num_records)
   }
@@ -105,7 +148,7 @@ impl<'a> Reader<'a> {
     mut curr_def_level: i16,
     mut curr_rep_level: i16,
     paths: &HashMap<ColumnPath, usize>,
-    row_group_reader: &'a RowGroupReader
+    row_group_reader: &RowGroupReader
   ) -> Self {
     assert!(field.get_basic_info().has_repetition());
     // Update current definition and repetition levels for this type
@@ -209,7 +252,7 @@ impl<'a> Reader<'a> {
   // == Value readers API ==
 
   /// Wraps reader in option reader based on repetition.
-  fn option(repetition: Repetition, def_level: i16, reader: Reader<'a>) -> Self {
+  fn option(repetition: Repetition, def_level: i16, reader: Reader) -> Self {
     if repetition == Repetition::OPTIONAL {
       Reader::OptionReader(def_level - 1, Box::new(reader))
     } else {

@@ -32,5 +32,18 @@ fn main() {
   print_schema(&mut std::io::stdout(), &schema);
   println!();
 
-  parquet_reader.read_data(schema, None);
+  let num_records: Option<usize> = Some(2);
+  let mut iter = parquet_reader.get_row_iter(schema).unwrap();
+
+  let all_records = num_records.is_none();
+  let mut start = 0;
+  let end = num_records.unwrap_or(0);
+
+  while all_records || start < end {
+    match iter.next() {
+      Some(row) => println!("{}", row),
+      None => break,
+    }
+    start += 1;
+  }
 }
