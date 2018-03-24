@@ -26,29 +26,31 @@ use record::triplet::TripletIter;
 /// Default batch size for a reader
 const DEFAULT_BATCH_SIZE: usize = 256;
 
-/// Reader tree for record assembly
-pub enum Reader {
-  // Primitive reader with type information and triplet iterator
-  PrimitiveReader(TypePtr, TripletIter),
-  // Optional reader with definition level of a parent and a reader
-  OptionReader(i16, Box<Reader>),
-  // Group (struct) reader with type information, definition level and list of child
-  // readers. When it represents message type, type information is None
-  GroupReader(Option<TypePtr>, i16, Vec<Reader>),
-  // Reader for repeated values, e.g. lists, contains type information, definition level,
-  // repetition level and a child reader
-  RepeatedReader(TypePtr, i16, i16, Box<Reader>),
-  // Reader of key-value pairs, e.g. maps, contains type information, definition level,
-  // repetition level, child reader for keys and child reader for values
-  KeyValueReader(TypePtr, i16, i16, Box<Reader>, Box<Reader>)
+/// Tree builder for `Reader` enum.
+/// Serves as a container of options for building a reader tree and a builder.
+pub struct TreeBuilder {
+  // Batch size (>= 1) for triplet iterators
+  batch_size: usize
 }
 
-impl Reader {
+impl TreeBuilder {
+  /// Creates new tree builder with default parameters.
+  pub fn new() -> Self {
+    Self { batch_size: DEFAULT_BATCH_SIZE }
+  }
+
+  /// Sets batch size for this tree builder.
+  pub fn with_batch_size(mut self, batch_size: usize) -> Self {
+    self.batch_size = batch_size;
+    self
+  }
+
   /// Creates new root reader for provided schema and row group.
-  pub fn new(
+  pub fn build(
+    &self,
     descr: SchemaDescPtr,
     row_group_reader: &RowGroupReader
-  ) -> Self {
+  ) -> Reader {
     // Prepare map of column paths for pruning
     let mut paths: HashMap<ColumnPath, usize> = HashMap::new();
     let row_group_metadata = row_group_reader.metadata();
@@ -63,7 +65,7 @@ impl Reader {
     let mut readers = Vec::new();
     let mut path = Vec::new();
     for field in descr.root_schema().get_fields() {
-      let reader = Self::reader_tree(
+      let reader = self.reader_tree(
         field.clone(), &mut path, 0, 0, &paths, row_group_reader);
       readers.push(reader);
     }
@@ -74,23 +76,25 @@ impl Reader {
   }
 
   /// Creates `Row` iterator directly from schema descriptor and row group.
-  pub fn row_iter(
+  pub fn as_row_iter(
+    &self,
     descr: SchemaDescPtr,
     row_group_reader: &RowGroupReader
   ) -> RowIter {
     let num_records = row_group_reader.metadata().num_rows() as usize;
-    RowIter::new(Self::new(descr, row_group_reader), num_records)
+    RowIter::new(self.build(descr, row_group_reader), num_records)
   }
 
   /// Builds tree of readers for the current schema recursively.
   fn reader_tree(
+    &self,
     field: TypePtr,
     mut path: &mut Vec<String>,
     mut curr_def_level: i16,
     mut curr_rep_level: i16,
     paths: &HashMap<ColumnPath, usize>,
     row_group_reader: &RowGroupReader
-  ) -> Self {
+  ) -> Reader {
     assert!(field.get_basic_info().has_repetition());
     // Update current definition and repetition levels for this type
     let repetition = field.get_basic_info().repetition();
@@ -111,7 +115,7 @@ impl Reader {
       let orig_index = *paths.get(&col_path).unwrap();
       let col_descr = row_group_reader.metadata().column(orig_index).column_descr_ptr();
       let col_reader = row_group_reader.get_column_reader(orig_index).unwrap();
-      let column = TripletIter::new(col_descr, col_reader, DEFAULT_BATCH_SIZE);
+      let column = TripletIter::new(col_descr, col_reader, self.batch_size);
       Reader::PrimitiveReader(field, column)
     } else {
       match field.get_basic_info().logical_type() {
@@ -123,9 +127,9 @@ impl Reader {
           assert_eq!(repeated_field.get_basic_info().repetition(),
             Repetition::REPEATED, "Invalid list type {:?}", field);
 
-          if Self::is_element_type(&repeated_field) {
+          if Reader::is_element_type(&repeated_field) {
             // Support for backward compatible lists
-            let reader = Self::reader_tree(repeated_field.clone(), &mut path,
+            let reader = self.reader_tree(repeated_field.clone(), &mut path,
               curr_def_level, curr_rep_level, paths, row_group_reader);
 
             Reader::RepeatedReader(
@@ -135,7 +139,7 @@ impl Reader {
 
             path.push(String::from(repeated_field.name()));
 
-            let reader = Self::reader_tree(child_field, &mut path,
+            let reader = self.reader_tree(child_field, &mut path,
               curr_def_level + 1, curr_rep_level + 1, paths, row_group_reader);
 
             path.pop();
@@ -158,14 +162,13 @@ impl Reader {
           path.push(String::from(key_value_type.name()));
 
           let key_type = &key_value_type.get_fields()[0];
-          // TODO: not sure if key can only be primitive, check this.
           assert!(key_type.is_primitive(),
             "Map key type is expected to be a primitive type, but found {:?}", key_type);
-          let key_reader = Self::reader_tree(key_type.clone(), &mut path,
+          let key_reader = self.reader_tree(key_type.clone(), &mut path,
             curr_def_level + 1, curr_rep_level + 1, paths, row_group_reader);
 
           let value_type = &key_value_type.get_fields()[1];
-          let value_reader = Self::reader_tree(value_type.clone(), &mut path,
+          let value_reader = self.reader_tree(value_type.clone(), &mut path,
             curr_def_level + 1, curr_rep_level + 1, paths, row_group_reader);
 
           path.pop();
@@ -177,7 +180,7 @@ impl Reader {
         _ => {
           let mut readers = Vec::new();
           for child in field.get_fields() {
-            let reader = Self::reader_tree(child.clone(), &mut path,
+            let reader = self.reader_tree(child.clone(), &mut path,
               curr_def_level, curr_rep_level, paths, row_group_reader);
             readers.push(reader);
           }
@@ -187,9 +190,28 @@ impl Reader {
     };
     path.pop();
 
-    Self::option(repetition, curr_def_level, reader)
+    Reader::option(repetition, curr_def_level, reader)
   }
+}
 
+/// Reader tree for record assembly
+pub enum Reader {
+  // Primitive reader with type information and triplet iterator
+  PrimitiveReader(TypePtr, TripletIter),
+  // Optional reader with definition level of a parent and a reader
+  OptionReader(i16, Box<Reader>),
+  // Group (struct) reader with type information, definition level and list of child
+  // readers. When it represents message type, type information is None
+  GroupReader(Option<TypePtr>, i16, Vec<Reader>),
+  // Reader for repeated values, e.g. lists, contains type information, definition level,
+  // repetition level and a child reader
+  RepeatedReader(TypePtr, i16, i16, Box<Reader>),
+  // Reader of key-value pairs, e.g. maps, contains type information, definition level,
+  // repetition level, child reader for keys and child reader for values
+  KeyValueReader(TypePtr, i16, i16, Box<Reader>, Box<Reader>)
+}
+
+impl Reader {
   /// Wraps reader in option reader based on repetition.
   fn option(repetition: Repetition, def_level: i16, reader: Reader) -> Self {
     if repetition == Repetition::OPTIONAL {

@@ -30,7 +30,7 @@ use schema::types::{self, Type as SchemaType, SchemaDescriptor};
 use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{Codec, create_codec};
-use record::reader::{FileRowIter, Reader as RecordReader, RowIter};
+use record::reader::{FileRowIter, RowIter, TreeBuilder};
 use util::io::FileChunk;
 use util::memory::ByteBufferPtr;
 
@@ -52,7 +52,9 @@ pub trait FileReader {
   /// may outlive the file reader.
   fn get_row_group(&self, i: usize) -> Result<Box<RowGroupReader>>;
 
-  /// Get full iterator of `Row` from a file (over all row groups)
+  /// Get full iterator of `Row` from a file (over all row groups).
+  /// Projected schema can be a subset of or equal to the file schema, when it is None,
+  /// full file schema is assumed.
   fn get_row_iter(&self, projection: Option<SchemaType>) -> Result<FileRowIter>;
 }
 
@@ -71,7 +73,9 @@ pub trait RowGroupReader {
   /// Get value reader for the `i`th column chunk
   fn get_column_reader(&self, i: usize) -> Result<ColumnReader>;
 
-  /// Get row iterator for this row group
+  /// Get row iterator for this row group, using schema descriptor.
+  /// Schema descriptor must be a valid subset of the file schema or be an original
+  /// descriptor, see `FileReader::get_row_iter` for more information.
   fn get_row_iter(&self, proj_descr: Rc<SchemaDescriptor>) -> RowIter;
 }
 
@@ -267,7 +271,8 @@ impl RowGroupReader for SerializedRowGroupReader {
   }
 
   fn get_row_iter(&self, proj_descr: Rc<SchemaDescriptor>) -> RowIter {
-    RecordReader::row_iter(proj_descr, self)
+    // Build new tree of readers and return them as a row iterator
+    TreeBuilder::new().as_row_iter(proj_descr, self)
   }
 }
 
