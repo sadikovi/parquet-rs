@@ -84,7 +84,6 @@ pub fn get_typed_column_reader<T: DataType>(
 }
 
 /// A value reader for a particular primitive column.
-/// The lifetime parameter `'a` denotes the lifetime of the page reader
 pub struct ColumnReaderImpl<T: DataType> {
   descr: ColumnDescPtr,
   def_level_decoder: Option<LevelDecoder>,
