@@ -22,90 +22,29 @@ use schema::types::{ColumnPath, SchemaDescPtr, Type, TypePtr};
 use record::api::Row;
 use record::triplet::TripletIter;
 
-pub struct FileRowIter<'a> {
-  descr: SchemaDescPtr,
-  file_reader: &'a FileReader,
-  curr_row_group: usize,
-  num_row_groups: usize,
-  iter: Option<RowIter>
-}
 
-impl<'a> FileRowIter<'a> {
-  pub fn new(descr: SchemaDescPtr, file_reader: &'a FileReader) -> Self {
-    let num_row_groups = file_reader.num_row_groups();
-
-    Self {
-      descr: descr,
-      file_reader: file_reader,
-      curr_row_group: 0,
-      num_row_groups: num_row_groups,
-      iter: None
-    }
-  }
-}
-
-impl<'a> Iterator for FileRowIter<'a> {
-  type Item = Row;
-
-  fn next(&mut self) -> Option<Row> {
-    let mut row = None;
-    if let Some(ref mut iter) = self.iter {
-      row = iter.next();
-    }
-
-    while row.is_none() && self.curr_row_group < self.num_row_groups {
-      let row_group_reader = self.file_reader.get_row_group(self.curr_row_group).unwrap();
-      self.curr_row_group += 1;
-      let mut iter = row_group_reader.get_row_iter(self.descr.clone());
-      row = iter.next();
-      self.iter = Some(iter);
-    }
-
-    row
-  }
-}
-
-/// Iterator of Rows
-pub struct RowIter {
-  root_reader: Reader,
-  records_left: usize
-}
-
-impl RowIter {
-  fn new(mut root_reader: Reader, num_records: usize) -> Self {
-    // Prepare root reader by advancing all column vectors
-    root_reader.advance_columns();
-    Self { root_reader: root_reader, records_left: num_records }
-  }
-}
-
-impl Iterator for RowIter {
-  type Item = Row;
-
-  fn next(&mut self) -> Option<Row> {
-    if self.records_left > 0 {
-      self.records_left -= 1;
-      Some(self.root_reader.read())
-    } else {
-      None
-    }
-  }
-}
-
-// TODO: Add builder pattern and make batch size configurable with default around
-// 128/256 records.
-const BATCH_SIZE: usize = 4;
+/// Default batch size for a reader
+const DEFAULT_BATCH_SIZE: usize = 256;
 
 /// Reader tree for record assembly
 pub enum Reader {
+  // Primitive reader with type information and triplet iterator
   PrimitiveReader(TypePtr, TripletIter),
+  // Optional reader with definition level of a parent and a reader
   OptionReader(i16, Box<Reader>),
+  // Group (struct) reader with type information, definition level and list of child
+  // readers. When it represents message type, type information is None
   GroupReader(Option<TypePtr>, i16, Vec<Reader>),
+  // Reader for repeated values, e.g. lists, contains type information, definition level,
+  // repetition level and a child reader
   RepeatedReader(TypePtr, i16, i16, Box<Reader>),
+  // Reader of key-value pairs, e.g. maps, contains type information, definition level,
+  // repetition level, child reader for keys and child reader for values
   KeyValueReader(TypePtr, i16, i16, Box<Reader>, Box<Reader>)
 }
 
 impl Reader {
+  /// Creates new root reader for provided schema and row group.
   pub fn new(
     descr: SchemaDescPtr,
     row_group_reader: &RowGroupReader
@@ -134,6 +73,7 @@ impl Reader {
     Reader::GroupReader(None, 0, readers)
   }
 
+  /// Creates `Row` iterator directly from schema descriptor and row group.
   pub fn row_iter(
     descr: SchemaDescPtr,
     row_group_reader: &RowGroupReader
@@ -142,6 +82,7 @@ impl Reader {
     RowIter::new(Self::new(descr, row_group_reader), num_records)
   }
 
+  /// Builds tree of readers for the current schema recursively.
   fn reader_tree(
     field: TypePtr,
     mut path: &mut Vec<String>,
@@ -170,7 +111,7 @@ impl Reader {
       let orig_index = *paths.get(&col_path).unwrap();
       let col_descr = row_group_reader.metadata().column(orig_index).column_descr_ptr();
       let col_reader = row_group_reader.get_column_reader(orig_index).unwrap();
-      let column = TripletIter::new(col_descr, col_reader, BATCH_SIZE);
+      let column = TripletIter::new(col_descr, col_reader, DEFAULT_BATCH_SIZE);
       Reader::PrimitiveReader(field, column)
     } else {
       match field.get_basic_info().logical_type() {
@@ -248,8 +189,6 @@ impl Reader {
 
     Self::option(repetition, curr_def_level, reader)
   }
-
-  // == Value readers API ==
 
   /// Wraps reader in option reader based on repetition.
   fn option(repetition: Repetition, def_level: i16, reader: Reader) -> Self {
@@ -483,6 +422,82 @@ impl Reader {
         keys.advance_columns();
         values.advance_columns();
       },
+    }
+  }
+}
+
+// ----------------------------------------------------------------------
+// Row iterators
+
+/// Iterator of `Row`s over all row groups in file reader.
+pub struct FileRowIter<'a> {
+  descr: SchemaDescPtr,
+  file_reader: &'a FileReader,
+  current_row_group: usize,
+  num_row_groups: usize,
+  row_iter: Option<RowIter>
+}
+
+impl<'a> FileRowIter<'a> {
+  pub fn new(descr: SchemaDescPtr, file_reader: &'a FileReader) -> Self {
+    let num_row_groups = file_reader.num_row_groups();
+
+    Self {
+      descr: descr,
+      file_reader: file_reader,
+      current_row_group: 0,
+      num_row_groups: num_row_groups,
+      row_iter: None
+    }
+  }
+}
+
+impl<'a> Iterator for FileRowIter<'a> {
+  type Item = Row;
+
+  fn next(&mut self) -> Option<Row> {
+    let mut row = None;
+    if let Some(ref mut iter) = self.row_iter {
+      row = iter.next();
+    }
+
+    while row.is_none() && self.current_row_group < self.num_row_groups {
+      // We do not expect any failures when accessing a row group
+      let row_group_reader =
+        self.file_reader.get_row_group(self.current_row_group).unwrap();
+      self.current_row_group += 1;
+      let mut iter = row_group_reader.get_row_iter(self.descr.clone());
+      row = iter.next();
+      self.row_iter = Some(iter);
+    }
+
+    row
+  }
+}
+
+/// Iterator of `Row`s.
+pub struct RowIter {
+  root_reader: Reader,
+  records_left: usize
+}
+
+impl RowIter {
+  fn new(mut root_reader: Reader, num_records: usize) -> Self {
+    // Prepare root reader by advancing all column vectors
+    root_reader.advance_columns();
+    Self { root_reader: root_reader, records_left: num_records }
+  }
+}
+
+impl Iterator for RowIter {
+  type Item = Row;
+
+  fn next(&mut self) -> Option<Row> {
+    if self.records_left > 0 {
+      self.records_left -= 1;
+      Some(self.root_reader.read())
+    } else {
+      None
     }
   }
 }
