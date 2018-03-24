@@ -22,6 +22,24 @@ use data_type::*;
 use errors::{Result, ParquetError};
 use schema::types::ColumnDescPtr;
 
+/// Macro to generate simple functions that cover all types of triplet iterator.
+/// $func is a function of a typed triplet iterator and $token is a either {`ref`} or
+/// {`ref`, `mut`}
+macro_rules! triplet_enum_func {
+  ($self:ident, $func:ident, $( $token:tt ),*) => ({
+    match *$self {
+      TripletIter::BoolTripletIter($($token)* typed) => typed.$func(),
+      TripletIter::Int32TripletIter($($token)* typed) => typed.$func(),
+      TripletIter::Int64TripletIter($($token)* typed) => typed.$func(),
+      TripletIter::Int96TripletIter($($token)* typed) => typed.$func(),
+      TripletIter::FloatTripletIter($($token)* typed) => typed.$func(),
+      TripletIter::DoubleTripletIter($($token)* typed) => typed.$func(),
+      TripletIter::ByteArrayTripletIter($($token)* typed) => typed.$func(),
+      TripletIter::FixedLenByteArrayTripletIter($($token)* typed) => typed.$func()
+    }
+  });
+}
+
 /// High level API wrapper on column reader.
 /// Provides per-element access for each primitive column.
 pub enum TripletIter {
@@ -78,16 +96,7 @@ impl TripletIter {
   /// Should be called once - either before `is_null` or `update_value`.
   #[inline]
   pub fn read_next(&mut self) -> Result<bool> {
-    match *self {
-      TripletIter::BoolTripletIter(ref mut typed) => typed.read_next(),
-      TripletIter::Int32TripletIter(ref mut typed) => typed.read_next(),
-      TripletIter::Int64TripletIter(ref mut typed) => typed.read_next(),
-      TripletIter::Int96TripletIter(ref mut typed) => typed.read_next(),
-      TripletIter::FloatTripletIter(ref mut typed) => typed.read_next(),
-      TripletIter::DoubleTripletIter(ref mut typed) => typed.read_next(),
-      TripletIter::ByteArrayTripletIter(ref mut typed) => typed.read_next(),
-      TripletIter::FixedLenByteArrayTripletIter(ref mut typed) => typed.read_next()
-    }
+    triplet_enum_func!(self, read_next, ref, mut)
   }
 
   /// Provides check on values/levels left without invoking the underlying typed triplet
@@ -96,76 +105,31 @@ impl TripletIter {
   /// It is always in sync with `read_next` method.
   #[inline]
   pub fn has_next(&self) -> bool {
-    match *self {
-      TripletIter::BoolTripletIter(ref typed) => typed.has_next(),
-      TripletIter::Int32TripletIter(ref typed) => typed.has_next(),
-      TripletIter::Int64TripletIter(ref typed) => typed.has_next(),
-      TripletIter::Int96TripletIter(ref typed) => typed.has_next(),
-      TripletIter::FloatTripletIter(ref typed) => typed.has_next(),
-      TripletIter::DoubleTripletIter(ref typed) => typed.has_next(),
-      TripletIter::ByteArrayTripletIter(ref typed) => typed.has_next(),
-      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.has_next()
-    }
+    triplet_enum_func!(self, has_next, ref)
   }
 
   /// Returns current definition level for a leaf triplet iterator
   #[inline]
   pub fn current_def_level(&self) -> i16 {
-    match *self {
-      TripletIter::BoolTripletIter(ref typed) => typed.current_def_level(),
-      TripletIter::Int32TripletIter(ref typed) => typed.current_def_level(),
-      TripletIter::Int64TripletIter(ref typed) => typed.current_def_level(),
-      TripletIter::Int96TripletIter(ref typed) => typed.current_def_level(),
-      TripletIter::FloatTripletIter(ref typed) => typed.current_def_level(),
-      TripletIter::DoubleTripletIter(ref typed) => typed.current_def_level(),
-      TripletIter::ByteArrayTripletIter(ref typed) => typed.current_def_level(),
-      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.current_def_level()
-    }
+    triplet_enum_func!(self, current_def_level, ref)
   }
 
   /// Returns max definition level for a leaf triplet iterator
   #[inline]
   pub fn max_def_level(&self) -> i16 {
-    match *self {
-      TripletIter::BoolTripletIter(ref typed) => typed.max_def_level(),
-      TripletIter::Int32TripletIter(ref typed) => typed.max_def_level(),
-      TripletIter::Int64TripletIter(ref typed) => typed.max_def_level(),
-      TripletIter::Int96TripletIter(ref typed) => typed.max_def_level(),
-      TripletIter::FloatTripletIter(ref typed) => typed.max_def_level(),
-      TripletIter::DoubleTripletIter(ref typed) => typed.max_def_level(),
-      TripletIter::ByteArrayTripletIter(ref typed) => typed.max_def_level(),
-      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.max_def_level()
-    }
+    triplet_enum_func!(self, max_def_level, ref)
   }
 
   /// Returns current repetition level for a leaf triplet iterator
   #[inline]
   pub fn current_rep_level(&self) -> i16 {
-    match *self {
-      TripletIter::BoolTripletIter(ref typed) => typed.current_rep_level(),
-      TripletIter::Int32TripletIter(ref typed) => typed.current_rep_level(),
-      TripletIter::Int64TripletIter(ref typed) => typed.current_rep_level(),
-      TripletIter::Int96TripletIter(ref typed) => typed.current_rep_level(),
-      TripletIter::FloatTripletIter(ref typed) => typed.current_rep_level(),
-      TripletIter::DoubleTripletIter(ref typed) => typed.current_rep_level(),
-      TripletIter::ByteArrayTripletIter(ref typed) => typed.current_rep_level(),
-      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.current_rep_level()
-    }
+    triplet_enum_func!(self, current_rep_level, ref)
   }
 
   /// Returns max repetition level for a leaf triplet iterator
   #[inline]
   pub fn max_rep_level(&self) -> i16 {
-    match *self {
-      TripletIter::BoolTripletIter(ref typed) => typed.max_rep_level(),
-      TripletIter::Int32TripletIter(ref typed) => typed.max_rep_level(),
-      TripletIter::Int64TripletIter(ref typed) => typed.max_rep_level(),
-      TripletIter::Int96TripletIter(ref typed) => typed.max_rep_level(),
-      TripletIter::FloatTripletIter(ref typed) => typed.max_rep_level(),
-      TripletIter::DoubleTripletIter(ref typed) => typed.max_rep_level(),
-      TripletIter::ByteArrayTripletIter(ref typed) => typed.max_rep_level(),
-      TripletIter::FixedLenByteArrayTripletIter(ref typed) => typed.max_rep_level()
-    }
+    triplet_enum_func!(self, max_rep_level, ref)
   }
 
   /// Returns true, if current value is null.
