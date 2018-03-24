@@ -51,19 +51,21 @@ impl TreeBuilder {
     descr: SchemaDescPtr,
     row_group_reader: &RowGroupReader
   ) -> Reader {
-    // Prepare map of column paths for pruning
+    // Prepare lookup table of column path -> original column index
+    // This allows to prune columns and map schema leaf nodes to the column readers
     let mut paths: HashMap<ColumnPath, usize> = HashMap::new();
     let row_group_metadata = row_group_reader.metadata();
 
     for col_index in 0..row_group_reader.num_columns() {
       let col_meta = row_group_metadata.column(col_index);
-      // TODO: avoid cloning of column path
       let col_path = col_meta.column_path().clone();
       paths.insert(col_path, col_index);
     }
 
+    // Build child readers for the message type
     let mut readers = Vec::new();
     let mut path = Vec::new();
+
     for field in descr.root_schema().get_fields() {
       let reader = self.reader_tree(
         field.clone(), &mut path, 0, 0, &paths, row_group_reader);
