@@ -28,14 +28,14 @@ use schema::types::ColumnPath;
 ///
 /// Basic constant, which is not part of the Thrift definition.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ParquetVersion {
+pub enum WriterVersion {
   PARQUET_1_0,
   PARQUET_2_0
 }
 
 const DEFAULT_PAGE_SIZE: usize = 1024 * 1024;
 const DEFAULT_WRITE_BATCH_SIZE: usize = 1024;
-const DEFAULT_WRITER_VERSION: ParquetVersion = ParquetVersion::PARQUET_1_0;
+const DEFAULT_WRITER_VERSION: WriterVersion = WriterVersion::PARQUET_1_0;
 const DEFAULT_ENCODING: Encoding = Encoding::PLAIN;
 const DEFAULT_COMPRESSION: Compression = Compression::UNCOMPRESSED;
 const DEFAULT_DICTIONARY_ENABLED: bool = true;
@@ -46,54 +46,66 @@ const DEFAULT_MAX_ROW_GROUP_LENGTH: usize = 64 * 1024 * 1024;
 // TODO: Generate default created by string
 const DEFAULT_CREATED_BY: &str = "parquet-rs version x.y.z (build ABC)";
 
+/// Writer properties.
+///
+/// It is created as an immutable data structure, use [`WriterPropertiesBuilder`] to
+/// assemble the properties.
 #[derive(Debug, Clone)]
 pub struct WriterProperties {
   dictionary_pagesize_limit: usize,
   write_batch_size: usize,
   max_row_group_length: usize,
-  writer_version: ParquetVersion,
+  writer_version: WriterVersion,
   created_by: String,
   default_column_properties: ColumnProperties,
   column_properties: HashMap<ColumnPath, ColumnProperties>
 }
 
 impl WriterProperties {
+  /// Returns builder for writer properties.
   pub fn builder() -> WriterPropertiesBuilder {
     WriterPropertiesBuilder::with_defaults()
   }
 
+  /// Returns dictionary page size limit.
   pub fn dictionary_pagesize_limit(&self) -> usize {
     self.dictionary_pagesize_limit
   }
 
+  /// Returns configured batch size.
   pub fn write_batch_size(&self) -> usize {
     self.write_batch_size
   }
 
+  /// Returns max size for a row group.
   pub fn max_row_group_length(&self) -> usize {
     self.max_row_group_length
   }
 
-  pub fn writer_version(&self) -> ParquetVersion {
+  /// Returns configured writer version.
+  pub fn writer_version(&self) -> WriterVersion {
     self.writer_version
   }
 
+  /// Returns encoding for a data page, when dictionary encoding is enabled.
   #[inline]
   pub fn data_page_dictionary_encoding(&self) -> Encoding {
     match self.writer_version {
-      ParquetVersion::PARQUET_1_0 => Encoding::PLAIN_DICTIONARY,
-      ParquetVersion::PARQUET_2_0 => Encoding::RLE_DICTIONARY
+      WriterVersion::PARQUET_1_0 => Encoding::PLAIN_DICTIONARY,
+      WriterVersion::PARQUET_2_0 => Encoding::RLE_DICTIONARY
     }
   }
 
+  /// Returns encoding for dictionary page, when dictionary encoding is enabled.
   #[inline]
   pub fn dictionary_page_encoding(&self) -> Encoding {
     match self.writer_version {
-      ParquetVersion::PARQUET_1_0 => Encoding::PLAIN_DICTIONARY,
-      ParquetVersion::PARQUET_2_0 => Encoding::PLAIN
+      WriterVersion::PARQUET_1_0 => Encoding::PLAIN_DICTIONARY,
+      WriterVersion::PARQUET_2_0 => Encoding::PLAIN
     }
   }
 
+  /// Returns (fallback) encoding for a column.
   pub fn encoding(&self, col: &ColumnPath) -> Encoding {
     match self.column_properties.get(col) {
       Some(props) if props.encoding().is_some() => props.encoding().unwrap(),
@@ -101,6 +113,7 @@ impl WriterProperties {
     }
   }
 
+  /// Returns compression codec for a column.
   pub fn compression(&self, col: &ColumnPath) -> Compression {
     match self.column_properties.get(col) {
       Some(props) if props.compression().is_some() => props.compression().unwrap(),
@@ -108,6 +121,7 @@ impl WriterProperties {
     }
   }
 
+  /// Returns `true` if dictionary encoding is enabled for a column.
   pub fn dictionary_enabled(&self, col: &ColumnPath) -> bool {
     match self.column_properties.get(col) {
       Some(props) if props.dictionary_enabled().is_some() => {
@@ -120,6 +134,7 @@ impl WriterProperties {
     }
   }
 
+  /// Returns `true` if statistics are enabled for a column.
   pub fn statistics_enabled(&self, col: &ColumnPath) -> bool {
     match self.column_properties.get(col) {
       Some(props) if props.statistics_enabled().is_some() => {
@@ -132,6 +147,8 @@ impl WriterProperties {
     }
   }
 
+  /// Returns max size for statistics.
+  /// Only applicable if statistics are enabled.
   pub fn max_statistics_size(&self, col: &ColumnPath) -> usize {
     match self.column_properties.get(col) {
       Some(props) if props.max_statistics_size().is_some() => {
@@ -229,17 +246,19 @@ impl ColumnProperties {
   }
 }
 
+/// Writer properties builder.
 pub struct WriterPropertiesBuilder {
   dictionary_pagesize_limit: usize,
   write_batch_size: usize,
   max_row_group_length: usize,
-  writer_version: ParquetVersion,
+  writer_version: WriterVersion,
   created_by: String,
   default_column_properties: ColumnProperties,
   column_properties: HashMap<ColumnPath, ColumnProperties>
 }
 
 impl WriterPropertiesBuilder {
+  /// Returns default state of the builder.
   fn with_defaults() -> Self {
     Self {
       dictionary_pagesize_limit: DEFAULT_DICTIONARY_PAGE_SIZE_LIMIT,
@@ -252,6 +271,7 @@ impl WriterPropertiesBuilder {
     }
   }
 
+  /// Finalizes the configuration and returns immutable writer properties struct.
   pub fn build(self) -> WriterProperties {
     WriterProperties {
       dictionary_pagesize_limit: self.dictionary_pagesize_limit,
@@ -267,21 +287,31 @@ impl WriterPropertiesBuilder {
   // ----------------------------------------------------------------------
   // Writer properies related to a file
 
+  /// Sets writer version.
+  pub fn set_writer_version(mut self, value: WriterVersion) -> Self {
+    self.writer_version = value;
+    self
+  }
+
+  /// Sets dictionary page size limit.
   pub fn set_dictionary_pagesize_limit(mut self, value: usize) -> Self {
     self.dictionary_pagesize_limit = value;
     self
   }
 
+  /// Sets write batch size.
   pub fn set_write_batch_size(mut self, value: usize) -> Self {
     self.write_batch_size = value;
     self
   }
 
+  /// Sets max size for a row group.
   pub fn set_max_row_group_length(mut self, value: usize) -> Self {
     self.max_row_group_length = value;
     self
   }
 
+  /// Sets "created by" property.
   pub fn set_created_by(mut self, value: String) -> Self {
     self.created_by = value;
     self
@@ -290,26 +320,32 @@ impl WriterPropertiesBuilder {
   // ----------------------------------------------------------------------
   // Setters for any column (global)
 
+  /// Sets (fallback) encoding for any column.
   pub fn set_encoding(mut self, value: Encoding) -> Self {
     self.default_column_properties.set_encoding(value);
     self
   }
 
+  /// Sets compression codec encoding for any column.
   pub fn set_compression(mut self, value: Compression) -> Self {
     self.default_column_properties.set_compression(value);
     self
   }
 
+  /// Sets flag to enable/disable dictionary encoding for any column.
   pub fn set_dictionary_enabled(mut self, value: bool) -> Self {
     self.default_column_properties.set_dictionary_enabled(value);
     self
   }
 
+  /// Sets flag to enable/disable statistics for any column.
   pub fn set_statistics_enabled(mut self, value: bool) -> Self {
     self.default_column_properties.set_statistics_enabled(value);
     self
   }
 
+  /// Sets max statistics size for any column.
+  /// Applicable only if statistics are enabled.
   pub fn set_max_statistics_size(mut self, value: usize) -> Self {
     self.default_column_properties.set_max_statistics_size(value);
     self
@@ -323,26 +359,36 @@ impl WriterPropertiesBuilder {
     self.column_properties.entry(col).or_insert(ColumnProperties::new())
   }
 
+  /// Sets encoding for a column.
+  /// Takes precedence over globally defined settings.
   pub fn set_col_encoding(mut self, col: ColumnPath, value: Encoding) -> Self {
     self.get_mut_props(col).set_encoding(value);
     self
   }
 
+  /// Sets compression codec for a column.
+  /// Takes precedence over globally defined settings.
   pub fn set_col_compression(mut self, col: ColumnPath, value: Compression) -> Self {
     self.get_mut_props(col).set_compression(value);
     self
   }
 
+  /// Sets flag to enable/disable dictionary encoding for a column.
+  /// Takes precedence over globally defined settings.
   pub fn set_col_dictionary_enabled(mut self, col: ColumnPath, value: bool) -> Self {
     self.get_mut_props(col).set_dictionary_enabled(value);
     self
   }
 
+  /// Sets flag to enable/disable statistics for a column.
+  /// Takes precedence over globally defined settings.
   pub fn set_col_statistics_enabled(mut self, col: ColumnPath, value: bool) -> Self {
     self.get_mut_props(col).set_statistics_enabled(value);
     self
   }
 
+  /// Sets max size for statistics for a column.
+  /// Takes precedence over globally defined settings.
   pub fn set_col_max_statistics_size(mut self, col: ColumnPath, value: usize) -> Self {
     self.get_mut_props(col).set_max_statistics_size(value);
     self
