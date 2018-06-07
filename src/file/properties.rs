@@ -16,6 +16,28 @@
 // under the License.
 
 //! Reader and writer properties.
+//!
+//! # Usage
+//!
+/*!
+```rust
+use parquet::basic::{Compression, Encoding};
+use parquet::file::properties::*;
+use parquet::schema::types::ColumnPath;
+
+// Use properties builder to assemble the configuration.
+let props = WriterProperties::builder()
+  .set_writer_version(WriterVersion::PARQUET_1_0)
+  .set_encoding(Encoding::PLAIN)
+  .set_col_encoding(ColumnPath::from("col1"), Encoding::DELTA_BINARY_PACKED)
+  .set_compression(Compression::SNAPPY)
+  .build();
+
+assert_eq!(props.writer_version(), WriterVersion::PARQUET_1_0);
+assert_eq!(props.encoding(&ColumnPath::from("col1")), Encoding::DELTA_BINARY_PACKED);
+assert_eq!(props.encoding(&ColumnPath::from("col2")), Encoding::PLAIN);
+```
+*/
 
 use std::collections::HashMap;
 
