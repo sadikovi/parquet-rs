@@ -110,6 +110,22 @@ pub trait PageReader {
   fn get_next_page(&mut self) -> Result<Option<Page>>;
 }
 
+/// API for writing pages in column chunk.
+pub trait PageWriter {
+  /// Returns `true` if page writer has a compression set.
+  fn has_compressor(&self) -> bool;
+
+  /// Writes data page into the output stream/sink.
+  /// Data page is always passed uncompressed, so page writer has a compression codec,
+  /// page should be compressed accordingly.
+  fn write_data_page(&mut self, page: Page) -> Result<()>;
+
+  /// Writes dictionary page into the output stream/sink.
+  fn write_dictionary_page(&mut self, page: Page) -> Result<()>;
+
+  /// Closes page writer and updates metadata if needed.
+  fn close(has_dictionary: bool, fallback: bool) -> Result<()>;
+}
 
 #[cfg(test)]
 mod tests {
