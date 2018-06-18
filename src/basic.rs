@@ -417,6 +417,21 @@ impl convert::From<parquet::Type> for Type {
   }
 }
 
+impl convert::From<Type> for parquet::Type {
+  fn from(tp: Type) -> Self {
+    match tp {
+      Type::BOOLEAN => parquet::Type::BOOLEAN,
+      Type::INT32 => parquet::Type::INT32,
+      Type::INT64 => parquet::Type::INT64,
+      Type::INT96 => parquet::Type::INT96,
+      Type::FLOAT => parquet::Type::FLOAT,
+      Type::DOUBLE => parquet::Type::DOUBLE,
+      Type::BYTE_ARRAY => parquet::Type::BYTE_ARRAY,
+      Type::FIXED_LEN_BYTE_ARRAY => parquet::Type::FIXED_LEN_BYTE_ARRAY
+    }
+  }
+}
+
 impl convert::From<Option<parquet::ConvertedType>> for LogicalType {
   fn from(op: Option<parquet::ConvertedType>) -> Self {
     match op {
@@ -486,6 +501,20 @@ impl convert::From<parquet::CompressionCodec> for Compression {
       parquet::CompressionCodec::BROTLI => Compression::BROTLI,
       parquet::CompressionCodec::LZ4 => Compression::LZ4,
       parquet::CompressionCodec::ZSTD => Compression::ZSTD
+    }
+  }
+}
+
+impl convert::From<Compression> for parquet::CompressionCodec {
+  fn from(tp: Compression) -> Self {
+    match tp {
+      Compression::UNCOMPRESSED => parquet::CompressionCodec::UNCOMPRESSED,
+      Compression::SNAPPY => parquet::CompressionCodec::SNAPPY,
+      Compression::GZIP => parquet::CompressionCodec::GZIP,
+      Compression::LZO => parquet::CompressionCodec::LZO,
+      Compression::BROTLI => parquet::CompressionCodec::BROTLI,
+      Compression::LZ4 => parquet::CompressionCodec::LZ4,
+      Compression::ZSTD => parquet::CompressionCodec::ZSTD
     }
   }
 }
