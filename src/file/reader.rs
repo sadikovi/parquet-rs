@@ -30,6 +30,7 @@ use column::page::{Page, PageReader};
 use column::reader::{ColumnReader, ColumnReaderImpl};
 use compression::{create_codec, Codec};
 use errors::{ParquetError, Result};
+use file::{FOOTER_SIZE, PARQUET_MAGIC};
 use file::metadata::*;
 use file::statistics;
 use parquet_format::{ColumnOrder as TColumnOrder, FileMetaData as TFileMetaData};
@@ -106,9 +107,6 @@ impl<'a, T: 'a + Read> Read for TMemoryBuffer<'a, T> {
 
 // ----------------------------------------------------------------------
 // Serialized impl for file & row group readers
-
-const FOOTER_SIZE: usize = 8;
-const PARQUET_MAGIC: [u8; 4] = [b'P', b'A', b'R', b'1'];
 
 /// A serialized implementation for Parquet [`FileReader`].
 pub struct SerializedFileReader {
