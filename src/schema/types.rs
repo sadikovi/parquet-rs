@@ -497,6 +497,11 @@ impl ColumnPath {
   pub fn string(&self) -> String {
     self.parts.join(".")
   }
+
+  /// Returns slice of parts of the column path.
+  pub fn as_slice(&self) -> &[String] {
+    &self.parts
+  }
 }
 
 impl fmt::Display for ColumnPath {
