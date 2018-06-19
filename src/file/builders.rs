@@ -17,24 +17,29 @@
 
 //! Contains metadata builders.
 
-use file::properties::WriterProperties;
+use std::rc::Rc;
+
+use basic::Encoding;
+use file::properties::{WriterProperties, WriterVersion};
 use parquet_format::{ColumnChunk, ColumnMetaData};
 use schema::types::ColumnDescPtr;
 
 // Builder for column chunk metadata.
 pub struct ColumnChunkMetaDataBuilder {
+  properties: Rc<WriterProperties>,
+  column_descr: ColumnDescPtr,
   column_chunk: ColumnChunk
 }
 
 impl ColumnChunkMetaDataBuilder {
-  pub fn new(properties: &WriterProperties, column_descr: ColumnDescPtr) -> Self {
+  pub fn new(properties: Rc<WriterProperties>, column_descr: ColumnDescPtr) -> Self {
     let column_metadata = ColumnMetaData {
       // Type of this column *
       type_: column_descr.physical_type().into(),
       // Set of all encodings used for this column.
       encodings: vec![],
       // Path in schema.
-      path_in_schema: vec![],
+      path_in_schema: Vec::from(column_descr.path().as_slice()),
       // Compression codec.
       codec: properties.compression(column_descr.path()).into(),
       // Number of values in this column.
@@ -58,6 +63,8 @@ impl ColumnChunkMetaDataBuilder {
     };
 
     Self {
+      properties: properties,
+      column_descr: column_descr,
       column_chunk: ColumnChunk {
         // Path is relative to the current file.
         file_path: None,
@@ -74,6 +81,47 @@ impl ColumnChunkMetaDataBuilder {
 
   pub fn set_file_path(&mut self, path: String) {
     self.column_chunk.file_path = Some(path);
+  }
+
+  pub fn finish(
+    &mut self,
+    num_values: i64,
+    compressed_size: i64,
+    uncompressed_size: i64,
+    data_page_offset: i64,
+    dictionary_fallback: bool,
+    dictionary_page_offset: Option<i64>,
+    index_page_offset: Option<i64>
+  )
+  {
+    let meta_data = self.column_chunk.meta_data.as_mut().unwrap();
+    meta_data.num_values = num_values;
+    meta_data.total_compressed_size = compressed_size;
+    meta_data.total_uncompressed_size = uncompressed_size;
+    meta_data.data_page_offset = data_page_offset;
+    meta_data.dictionary_page_offset = dictionary_page_offset;
+    meta_data.index_page_offset = index_page_offset;
+
+    let mut thrift_encodings = Vec::new();
+
+    if let Some(dict_offset) = dictionary_page_offset {
+      self.column_chunk.file_offset = dict_offset + compressed_size;
+      // TODO: parquet-cpp forces PLAIN encoding for data page in dictionary case,
+      // but we store whatever V1 encoding is set.
+      thrift_encodings.push(self.properties.dictionary_page_encoding().into());
+      thrift_encodings.push(self.properties.data_page_dictionary_encoding().into());
+    } else {
+      // dictionary is not enabled
+      self.column_chunk.file_offset = data_page_offset + compressed_size;
+      thrift_encodings.push(self.properties.encoding(self.column_descr.path()).into());
+    }
+    if dictionary_fallback {
+      match self.properties.writer_version() {
+        WriterVersion::PARQUET_1_0 => thrift_encodings.push(Encoding::PLAIN.into()),
+        WriterVersion::PARQUET_2_0 => panic!("Not supported for V2")
+      }
+    }
+    meta_data.encodings = thrift_encodings;
   }
 }
 
