@@ -22,7 +22,7 @@ use column::page::Page;
 use compression::{Codec, create_codec};
 use errors::Result;
 use file::statistics::Statistics;
-use parquet_format::{DictionaryPageHeader, PageHeader};
+use parquet_format::{DataPageHeader, DataPageHeaderV2, DictionaryPageHeader, PageHeader};
 use util::io::PosWrite;
 use util::memory::ByteBufferPtr;
 
@@ -33,8 +33,10 @@ use util::memory::ByteBufferPtr;
 pub struct SerializedPageWriter {
   compressor: Option<Box<Codec>>,
   dictionary_page_offset: Option<u64>,
+  data_page_offset: Option<u64>,
   total_uncompressed_size: u64,
-  total_compressed_size: u64
+  total_compressed_size: u64,
+  num_values: u64
 }
 
 impl SerializedPageWriter {
@@ -43,9 +45,41 @@ impl SerializedPageWriter {
     Self {
       compressor: create_codec(codec).expect("Codec is supported"),
       dictionary_page_offset: None,
+      data_page_offset: None,
       total_uncompressed_size: 0,
-      total_compressed_size: 0
+      total_compressed_size: 0,
+      num_values: 0
     }
+  }
+
+  /// Returns dictionary page offset, if set.
+  #[inline]
+  pub fn dictionary_page_offset(&self) -> Option<u64> {
+    self.dictionary_page_offset
+  }
+
+  /// Returns data page (either v1 or v2) offset, if set.
+  #[inline]
+  pub fn data_page_offset(&self) -> Option<u64> {
+    self.data_page_offset
+  }
+
+  /// Returns total uncompressed size so far.
+  #[inline]
+  pub fn total_uncompressed_size(&self) -> u64 {
+    self.total_uncompressed_size
+  }
+
+  /// Returns total compressed size so far.
+  #[inline]
+  pub fn total_compressed_size(&self) -> u64 {
+    self.total_compressed_size
+  }
+
+  /// Returns number of values so far.
+  #[inline]
+  pub fn num_values(&self) -> u64 {
+    self.num_values
   }
 
   /// Returns true, if page writer has a compressor set.
@@ -118,12 +152,80 @@ impl SerializedPageWriter {
     }
   }
 
+  /// Writes compressed data page into output stream.
   pub fn write_data_page(
     &mut self,
     page: CompressedPage,
     sink: &mut PosWrite
   ) -> Result<usize> {
-    unimplemented!();
+    let uncompressed_size = page.uncompressed_size();
+    let compressed_size = page.compressed_size();
+    let num_values = page.num_values();
+    let encoding = page.encoding();
+
+    let mut page_header = PageHeader {
+      type_: page.page_type().into(),
+      uncompressed_page_size: uncompressed_size as i32,
+      compressed_page_size: compressed_size as i32,
+      // TODO: Add support for crc checksum
+      crc: None,
+      data_page_header: None,
+      index_page_header: None,
+      dictionary_page_header: None,
+      data_page_header_v2: None
+    };
+
+    match page {
+      CompressedPage::DataPage { def_level_encoding, rep_level_encoding, .. } => {
+        let data_page_header = DataPageHeader {
+          num_values: num_values as i32,
+          encoding: encoding.into(),
+          definition_level_encoding: def_level_encoding.into(),
+          repetition_level_encoding: rep_level_encoding.into(),
+          // TODO: Process statistics
+          statistics: None
+        };
+
+        page_header.data_page_header = Some(data_page_header);
+      },
+      CompressedPage::DataPageV2 {
+        num_nulls,
+        num_rows,
+        def_levels_byte_len,
+        rep_levels_byte_len,
+        is_compressed,
+        ..
+      } => {
+        let data_page_header_v2 = DataPageHeaderV2 {
+          num_values: num_values as i32,
+          num_nulls: num_nulls as i32,
+          num_rows: num_rows as i32,
+          encoding: encoding.into(),
+          definition_levels_byte_length: def_levels_byte_len as i32,
+          repetition_levels_byte_length: rep_levels_byte_len as i32,
+          is_compressed: Some(is_compressed),
+          // TODO: Process statistics
+          statistics: None
+        };
+
+        page_header.data_page_header_v2 = Some(data_page_header_v2);
+      }
+    }
+
+    let start_pos = sink.pos();
+    if self.data_page_offset.is_none() {
+      self.data_page_offset = Some(start_pos);
+    }
+
+    let header_size = self.serialize_page_header(page_header, sink)?;
+    sink.write_all(page.data())?;
+
+    self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
+    self.total_compressed_size += (compressed_size + header_size) as u64;
+    self.num_values += num_values as u64;
+
+    let bytes_written = (sink.pos() - start_pos) as usize;
+    Ok(bytes_written)
   }
 
   fn serialize_page_header(
@@ -159,5 +261,49 @@ pub enum CompressedPage {
     rep_levels_byte_len: u32,
     is_compressed: bool,
     statistics: Option<Statistics>
+  }
+}
+
+impl CompressedPage {
+  pub fn page_type(&self) -> PageType {
+    match self {
+      CompressedPage::DataPage { .. } => PageType::DATA_PAGE,
+      CompressedPage::DataPageV2 { .. } => PageType::DATA_PAGE_V2
+    }
+  }
+
+  pub fn uncompressed_size(&self) -> usize {
+    match *self {
+      CompressedPage::DataPage { uncompressed_size, .. } => uncompressed_size,
+      CompressedPage::DataPageV2 { uncompressed_size, .. } => uncompressed_size
+    }
+  }
+
+  pub fn compressed_size(&self) -> usize {
+    match self {
+      CompressedPage::DataPage { buf, .. } => buf.len(),
+      CompressedPage::DataPageV2 { buf, .. } => buf.len()
+    }
+  }
+
+  pub fn num_values(&self) -> u32 {
+    match *self {
+      CompressedPage::DataPage { num_values, .. } => num_values,
+      CompressedPage::DataPageV2 { num_values, .. } => num_values
+    }
+  }
+
+  pub fn encoding(&self) -> Encoding {
+    match *self {
+      CompressedPage::DataPage { encoding, .. } => encoding,
+      CompressedPage::DataPageV2 { encoding, .. } => encoding
+    }
+  }
+
+  pub fn data(&self) -> &[u8] {
+    match self {
+      CompressedPage::DataPage { buf, .. } => buf.data(),
+      CompressedPage::DataPageV2 { buf, .. } => buf.data()
+    }
   }
 }
