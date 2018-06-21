@@ -20,6 +20,8 @@ use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read, Result, Seek, SeekFrom, Write};
 use std::sync::Mutex;
 
+use thrift::transport::TWriteTransport;
+
 /// Struct that represents a slice of a file data with independent start position and
 /// length. Internally clones provided file handle, wraps with BufReader and resets
 /// position before any read.
@@ -68,6 +70,31 @@ impl Read for FileChunk {
 pub trait PosWrite: Write {
   /// Returns the current position in the stream.
   fn pos(&self) -> u64;
+}
+
+/// Output stream as a thin wrapper for `PosWrite`.
+/// Wraps positional write steam to work as transport in Thrift.
+pub struct TOutputStream<'a> {
+  out: &'a mut PosWrite
+}
+
+impl<'a> TOutputStream<'a> {
+  pub fn new(stream: &'a mut PosWrite) -> Self {
+    Self { out: stream }
+  }
+}
+
+impl<'a> Write for TOutputStream<'a> {
+  fn write(&mut self, buf: &[u8]) -> Result<usize> {
+    self.out.write(buf)
+  }
+
+  fn flush(&mut self) -> Result<()> {
+    self.out.flush()
+  }
+}
+
+impl<'a> TWriteTransport for TOutputStream<'a> {
 }
 
 

@@ -23,7 +23,8 @@ use compression::{Codec, create_codec};
 use errors::Result;
 use file::statistics::Statistics;
 use parquet_format::{DataPageHeader, DataPageHeaderV2, DictionaryPageHeader, PageHeader};
-use util::io::PosWrite;
+use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
+use util::io::{PosWrite, TOutputStream};
 use util::memory::ByteBufferPtr;
 
 /// Serialized page writer.
@@ -228,12 +229,20 @@ impl SerializedPageWriter {
     Ok(bytes_written)
   }
 
+  /// Serializes page header into Thrift.
   fn serialize_page_header(
     &mut self,
-    _page_header: PageHeader,
-    _sink: &mut PosWrite
+    page_header: PageHeader,
+    sink: &mut PosWrite
   ) -> Result<usize> {
-    unimplemented!();
+    let start_pos = sink.pos();
+    {
+      let transport = TOutputStream::new(sink);
+      let mut protocol = TCompactOutputProtocol::new(transport);
+      page_header.write_to_out_protocol(&mut protocol)?;
+      protocol.flush()?;
+    }
+    Ok((sink.pos() - start_pos) as usize)
   }
 }
 
@@ -265,6 +274,7 @@ pub enum CompressedPage {
 }
 
 impl CompressedPage {
+  /// Returns page type.
   pub fn page_type(&self) -> PageType {
     match self {
       CompressedPage::DataPage { .. } => PageType::DATA_PAGE,
@@ -272,6 +282,7 @@ impl CompressedPage {
     }
   }
 
+  /// Returns uncompressed size in bytes.
   pub fn uncompressed_size(&self) -> usize {
     match *self {
       CompressedPage::DataPage { uncompressed_size, .. } => uncompressed_size,
@@ -279,6 +290,10 @@ impl CompressedPage {
     }
   }
 
+  /// Returns compressed size in bytes.
+  ///
+  /// Note that it is assumed that buffer is compressed, but it may not be. In this
+  /// case compressed size will be equal to uncompressed size.
   pub fn compressed_size(&self) -> usize {
     match self {
       CompressedPage::DataPage { buf, .. } => buf.len(),
@@ -286,6 +301,7 @@ impl CompressedPage {
     }
   }
 
+  /// Number of values in the data page.
   pub fn num_values(&self) -> u32 {
     match *self {
       CompressedPage::DataPage { num_values, .. } => num_values,
@@ -293,6 +309,7 @@ impl CompressedPage {
     }
   }
 
+  /// Returns encoding for values in the data page.
   pub fn encoding(&self) -> Encoding {
     match *self {
       CompressedPage::DataPage { encoding, .. } => encoding,
@@ -300,6 +317,7 @@ impl CompressedPage {
     }
   }
 
+  /// Returns slice of compressed buffer in data page.
   pub fn data(&self) -> &[u8] {
     match self {
       CompressedPage::DataPage { buf, .. } => buf.data(),
