@@ -17,7 +17,7 @@
 
 use std::cmp;
 use std::fs::File;
-use std::io::{BufReader, Error, ErrorKind, Read, Result, Seek, SeekFrom};
+use std::io::{BufReader, Error, ErrorKind, Read, Result, Seek, SeekFrom, Write};
 use std::sync::Mutex;
 
 /// Struct that represents a slice of a file data with independent start position and
@@ -61,6 +61,13 @@ impl Read for FileChunk {
 
     res
   }
+}
+
+/// Positional Write trait.
+/// Tracks the current position in the stream.
+pub trait PosWrite: Write {
+  /// Returns the current position in the stream.
+  fn pos(&self) -> u64;
 }
 
 

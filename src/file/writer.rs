@@ -17,95 +17,147 @@
 
 //! Contains file writer API.
 
-use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::rc::Rc;
-
+use basic::{Compression, Encoding, PageType};
+use column::page::Page;
+use compression::{Codec, create_codec};
 use errors::Result;
-use file::PARQUET_MAGIC;
-use file::properties::WriterProperties;
-use schema::types::{SchemaDescriptor, Type};
+use file::statistics::Statistics;
+use parquet_format::{DictionaryPageHeader, PageHeader};
+use util::io::PosWrite;
+use util::memory::ByteBufferPtr;
 
-// ----------------------------------------------------------------------
-// APIs for file & row group writers
-
-pub trait FileWriter {
-  /// Initialises the file, writes Parquet magic.
-  fn init(&mut self) -> Result<()>;
-
-  /// Appends the next row group.
-  /// Method should also perform all necessary metadata update.
-  fn append_row_group(&mut self, writer: Box<RowGroupWriter>) -> Result<()>;
-
-  /// Closes the file.
-  /// Metadata and Parquet magic should be written in this step.
-  fn close(&mut self) -> Result<()>;
+/// Serialized page writer.
+///
+/// Writes and serializes data pages into output stream,
+/// and provides proxy for comporession.
+pub struct SerializedPageWriter {
+  compressor: Option<Box<Codec>>,
+  dictionary_page_offset: Option<u64>,
+  total_uncompressed_size: u64,
+  total_compressed_size: u64
 }
 
-// ----------------------------------------------------------------------
-// Implementation for file writer
-
-pub struct SerializedFileWriter {
-  buf: BufWriter<File>,
-  descr: SchemaDescriptor,
-  properties: WriterProperties
-}
-
-impl SerializedFileWriter {
-  pub fn new(file: File, schema: Type, props: WriterProperties) -> Self {
+impl SerializedPageWriter {
+  /// Creates new page writer.
+  pub fn new(codec: Compression) -> Self {
     Self {
-      buf: BufWriter::new(file),
-      descr: SchemaDescriptor::new(Rc::new(schema)),
-      properties: props
+      compressor: create_codec(codec).expect("Codec is supported"),
+      dictionary_page_offset: None,
+      total_uncompressed_size: 0,
+      total_compressed_size: 0
     }
   }
-}
 
-impl FileWriter for SerializedFileWriter {
-  fn init(&mut self) -> Result<()> {
-    self.buf.write(&PARQUET_MAGIC)?;
-    Ok(())
+  /// Returns true, if page writer has a compressor set.
+  #[inline]
+  pub fn has_compressor(&self) -> bool {
+    self.compressor.is_some()
   }
 
-  fn append_row_group(&mut self, _writer: Box<RowGroupWriter>) -> Result<()> {
+  /// Compresses input buffer bytes into output buffer.
+  /// Fails if compressor is not set.
+  #[inline]
+  pub fn compress(&mut self, input_buf: &[u8], output_buf: &mut Vec<u8>) -> Result<()> {
+    assert!(self.has_compressor());
+    self.compressor.as_mut().unwrap().compress(input_buf, output_buf)
+  }
+
+  /// Writes dictionary page into output stream.
+  /// Should be written once per column.
+  pub fn write_dictionary_page(
+    &mut self,
+    page: Page,
+    sink: &mut PosWrite
+  ) -> Result<usize> {
+    match page {
+      Page::DictionaryPage { buf, num_values, encoding, is_sorted } => {
+        let uncompressed_size = buf.len();
+        let buf = if self.has_compressor() {
+          // TODO: reuse output buffer?
+          let mut output_buf = Vec::with_capacity(uncompressed_size);
+          self.compress(buf.data(), &mut output_buf)?;
+          ByteBufferPtr::new(output_buf)
+        } else {
+          buf
+        };
+        let compressed_size = buf.len();
+
+        // Create page headers
+        let dictionary_page_header = DictionaryPageHeader {
+          num_values: num_values as i32,
+          encoding: encoding.into(),
+          is_sorted: Some(is_sorted)
+        };
+
+        let page_header = PageHeader {
+          type_: PageType::DICTIONARY_PAGE.into(),
+          uncompressed_page_size: uncompressed_size as i32,
+          compressed_page_size: compressed_size as i32,
+          // TODO: Add support for crc checksum
+          crc: None,
+          data_page_header: None,
+          index_page_header: None,
+          dictionary_page_header: Some(dictionary_page_header),
+          data_page_header_v2: None,
+        };
+
+        let start_pos = sink.pos();
+        assert!(self.dictionary_page_offset.is_none(), "Dictionary page is already set");
+        self.dictionary_page_offset = Some(start_pos);
+        let header_size = self.serialize_page_header(page_header, sink)?;
+        sink.write_all(buf.data())?;
+
+        self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
+        self.total_compressed_size += (compressed_size + header_size) as u64;
+
+        // Return number of bytes written
+        let bytes_written = (sink.pos() - start_pos) as usize;
+        Ok(bytes_written)
+      }
+      _ => panic!("Write dictionary page only")
+    }
+  }
+
+  pub fn write_data_page(
+    &mut self,
+    page: CompressedPage,
+    sink: &mut PosWrite
+  ) -> Result<usize> {
     unimplemented!();
   }
 
-  fn close(&mut self) -> Result<()> {
+  fn serialize_page_header(
+    &mut self,
+    _page_header: PageHeader,
+    _sink: &mut PosWrite
+  ) -> Result<usize> {
     unimplemented!();
   }
 }
 
-pub trait RowGroupWriter {
-  /// Total number of rows that will be written by this row group writer.
-  fn num_rows(&self) -> usize;
-
-  /// Number of columns in this row group.
-  fn num_columns(&self) -> usize;
-
-  /// Returns column writer for the next column to write.
-  /// Columns are written directly to disk, so there is no way of modifying existing
-  /// column after requesting next column writer.
-  fn next_column(&mut self) -> Result<Box<ColumnWriter>>;
-
-  fn current_column_idx(&self) -> usize;
-
-  /// Closes the row group.
-  fn close(&mut self) -> Result<()>;
-}
-
-pub trait ColumnWriter {
-  fn write_dictionary_page(&mut self) -> Result<()>;
-
-  fn check_dictionary_size_limit(&self);
-
-  fn add_data_page(&mut self) -> Result<()>;
-
-  fn write_definition_levels(&mut self, num_levels: usize, levels: &[u16]) -> Result<()>;
-
-  fn write_repetition_levels(&mut self, num_levels: usize, levels: &[u16]) -> Result<()>;
-
-  fn flush_buffered_data_pages(&mut self) -> Result<()>;
-
-  fn close(&mut self) -> Result<()>;
+/// Helper struct to represent pages with potentially compressed buffer or concatenated
+/// buffer (def levels + rep levels + compressed values) for data page v2, so not to
+/// break the assumption that `Page` buffer is uncompressed.
+pub enum CompressedPage {
+  DataPage {
+    uncompressed_size: usize,
+    buf: ByteBufferPtr,
+    num_values: u32,
+    encoding: Encoding,
+    def_level_encoding: Encoding,
+    rep_level_encoding: Encoding,
+    statistics: Option<Statistics>
+  },
+  DataPageV2 {
+    uncompressed_size: usize,
+    buf: ByteBufferPtr,
+    num_values: u32,
+    encoding: Encoding,
+    num_nulls: u32,
+    num_rows: u32,
+    def_levels_byte_len: u32,
+    rep_levels_byte_len: u32,
+    is_compressed: bool,
+    statistics: Option<Statistics>
+  }
 }
