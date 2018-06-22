@@ -18,11 +18,15 @@
 //! Contains column writer API.
 
 use std::mem;
+use std::rc::Rc;
 
-use basic::Type;
+use basic::{Encoding, Type};
 use column::page::PageWriter;
 use data_type::*;
+use encodings::encoding::{DictEncoder, Encoder, get_encoder};
+use errors::Result;
 use schema::types::ColumnDescPtr;
+use util::memory::MemTracker;
 
 /// Column writer for a Parquet type.
 pub enum ColumnWriter {
@@ -81,18 +85,62 @@ pub fn get_typed_column_writer<T: DataType>(
   }
 }
 
+/// Typed column writer for a primitive column.
 pub struct ColumnWriterImpl<T: DataType> {
   col_descr: ColumnDescPtr,
   page_writer: Box<PageWriter>,
-  buf: Vec<T>
+  dict_encoder: Option<DictEncoder<T>>,
+  encoder: Option<Box<Encoder<T>>>
 }
 
-impl<T: DataType> ColumnWriterImpl<T> {
+impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   pub fn new(col_descr: ColumnDescPtr, page_writer: Box<PageWriter>) -> Self {
     Self {
       col_descr: col_descr,
       page_writer: page_writer,
-      buf: Vec::new()
+      dict_encoder: None,
+      encoder: None
     }
+  }
+
+  /// Writes batch of values, definition levels and repetition levels.
+  /// If it is non-nullable and non-repeated value, then definition and repetition levels
+  /// can be omitted.
+  pub fn write_batch(
+    &mut self,
+    values: &[T::T],
+    def_levels: Option<&[i16]>,
+    rep_levels: Option<&[i16]>
+  ) -> Result<()> {
+    unimplemented!();
+  }
+
+  /// Finalises writes and closes the column writer.
+  pub fn close(self) -> Result<()> {
+    unimplemented!();
+  }
+
+  /// Sets encoding for column writer.
+  /// If main encoding is dictionary encoding, then fallback is required, otherwise it is
+  /// optional and ignored.
+  pub fn set_encoding(&mut self, encoding: Encoding, fallback: Option<Encoding>) {
+    assert!(self.encoder.is_none(), "Can set encoder(s) only once");
+    let mut current = encoding;
+    // Optionally set dictionary encoder.
+    if current == Encoding::RLE_DICTIONARY || current == Encoding::PLAIN_DICTIONARY {
+      assert!(fallback.is_some(), "Dictionary encoding requires a fallback encoding");
+      self.dict_encoder = Some(DictEncoder::new(
+        self.col_descr.clone(),
+        Rc::new(MemTracker::new())
+      ));
+      current = fallback.unwrap();
+    }
+
+    // Set either main encoder or fallback encoder.
+    self.encoder = Some(get_encoder(
+      self.col_descr.clone(),
+      current,
+      Rc::new(MemTracker::new())
+    ).unwrap());
   }
 }
