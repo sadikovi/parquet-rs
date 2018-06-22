@@ -63,7 +63,7 @@ pub fn get_encoder<T: DataType>(
       Box::new(PlainEncoder::new(desc, mem_tracker, vec![]))
     },
     Encoding::RLE_DICTIONARY | Encoding::PLAIN_DICTIONARY => {
-      Box::new(DictEncoder::new(desc, mem_tracker))
+      return Err(general_err!("Cannot initialize this encoding through this function"))
     },
     Encoding::RLE => {
       Box::new(RleValueEncoder::new())
@@ -964,7 +964,9 @@ mod tests {
   trait EncodingTester<T: DataType> {
     fn test(enc: Encoding, total: usize, type_length: i32) {
       let result = match enc {
-        Encoding::PLAIN_DICTIONARY => Self::test_dict_internal(total, type_length),
+        Encoding::PLAIN_DICTIONARY | Encoding::RLE_DICTIONARY =>{
+          Self::test_dict_internal(total, type_length)
+        },
         enc @ _ => Self::test_internal(enc, total, type_length)
       };
 
@@ -1059,60 +1061,14 @@ mod tests {
   ) -> Box<Encoder<T>> where T: 'static {
     let desc = create_test_col_desc(type_len, T::get_physical_type());
     let mem_tracker = Rc::new(MemTracker::new());
-    let encoder: Box<Encoder<T>> = match enc {
-      Encoding::PLAIN => {
-        Box::new(PlainEncoder::<T>::new(Rc::new(desc), mem_tracker, vec![]))
-      },
-      Encoding::PLAIN_DICTIONARY => {
-        Box::new(DictEncoder::<T>::new(Rc::new(desc), mem_tracker))
-      },
-      Encoding::RLE => {
-        Box::new(RleValueEncoder::<T>::new())
-      },
-      Encoding::DELTA_BINARY_PACKED => {
-        Box::new(DeltaBitPackEncoder::<T>::new())
-      },
-      Encoding::DELTA_LENGTH_BYTE_ARRAY => {
-        Box::new(DeltaLengthByteArrayEncoder::<T>::new())
-      },
-      Encoding::DELTA_BYTE_ARRAY => {
-        Box::new(DeltaByteArrayEncoder::<T>::new())
-      },
-      _ => {
-        panic!("Not implemented yet.");
-      }
-    };
-    encoder
+    get_encoder(Rc::new(desc), enc, mem_tracker).unwrap()
   }
 
   fn create_test_decoder<T: DataType>(
     type_len: i32, enc: Encoding
   ) -> Box<Decoder<T>> where T: 'static {
     let desc = create_test_col_desc(type_len, T::get_physical_type());
-    let decoder: Box<Decoder<T>> = match enc {
-      Encoding::PLAIN => {
-        Box::new(PlainDecoder::<T>::new(desc.type_length()))
-      },
-      Encoding::PLAIN_DICTIONARY => {
-        Box::new(DictDecoder::<T>::new())
-      },
-      Encoding::RLE => {
-        Box::new(RleValueDecoder::new())
-      },
-      Encoding::DELTA_BINARY_PACKED => {
-        Box::new(DeltaBitPackDecoder::<T>::new())
-      },
-      Encoding::DELTA_LENGTH_BYTE_ARRAY => {
-        Box::new(DeltaLengthByteArrayDecoder::<T>::new())
-      },
-      Encoding::DELTA_BYTE_ARRAY => {
-        Box::new(DeltaByteArrayDecoder::<T>::new())
-      },
-      _ => {
-        panic!("Not implemented yet.");
-      }
-    };
-    decoder
+    get_decoder(Rc::new(desc), enc).unwrap()
   }
 
   fn create_test_dict_encoder<T: DataType>(type_len: i32) -> DictEncoder<T> {
