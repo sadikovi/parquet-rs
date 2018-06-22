@@ -124,7 +124,7 @@ pub trait PageWriter {
   fn write_dictionary_page(&mut self, page: Page) -> Result<()>;
 
   /// Closes page writer and updates metadata if needed.
-  fn close(has_dictionary: bool, fallback: bool) -> Result<()>;
+  fn close(&mut self, has_dictionary: bool, fallback: bool) -> Result<()>;
 }
 
 #[cfg(test)]
