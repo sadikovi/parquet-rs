@@ -908,6 +908,23 @@ mod tests {
   const TEST_SET_SIZE: usize = 1024;
 
   #[test]
+  fn test_disable_dictionary_in_get_encoder() {
+    // Column type and length do not really matter in this particular test,
+    // dictionary encoding must be initialized separately.
+    let desc = Rc::new(create_test_col_desc(-1, Int32Type::get_physical_type()));
+    let mem_tracker = Rc::new(MemTracker::new());
+
+    for enc in vec![Encoding::PLAIN_DICTIONARY, Encoding::RLE_DICTIONARY] {
+      let res = get_encoder::<Int32Type>(desc.clone(), enc, mem_tracker.clone());
+      assert!(res.is_err());
+      assert_eq!(
+        res.err().unwrap(),
+        general_err!("Cannot initialize this encoding through this function")
+      );
+    }
+  }
+
+  #[test]
   fn test_bool() {
     BoolType::test(Encoding::PLAIN, TEST_SET_SIZE, -1);
     BoolType::test(Encoding::PLAIN_DICTIONARY, TEST_SET_SIZE, -1);
