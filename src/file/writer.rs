@@ -17,6 +17,8 @@
 
 //! Contains file writer API.
 
+use std::io::Write;
+
 use basic::{Compression, Encoding, PageType};
 use column::page::Page;
 use compression::{Codec, create_codec};
@@ -24,14 +26,15 @@ use errors::Result;
 use file::statistics::Statistics;
 use parquet_format::{DataPageHeader, DataPageHeaderV2, DictionaryPageHeader, PageHeader};
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
-use util::io::{PosWrite, TOutputStream};
+use util::io::{Position, TOutputStream};
 use util::memory::ByteBufferPtr;
 
 /// Serialized page writer.
 ///
 /// Writes and serializes data pages into output stream,
 /// and provides proxy for comporession.
-pub struct SerializedPageWriter {
+pub struct SerializedPageWriter<T: Write + Position> {
+  sink: T,
   compressor: Option<Box<Codec>>,
   dictionary_page_offset: Option<u64>,
   data_page_offset: Option<u64>,
@@ -40,10 +43,11 @@ pub struct SerializedPageWriter {
   num_values: u64
 }
 
-impl SerializedPageWriter {
+impl<T: Write + Position> SerializedPageWriter<T> {
   /// Creates new page writer.
-  pub fn new(codec: Compression) -> Self {
+  pub fn new(codec: Compression, sink: T) -> Self {
     Self {
+      sink: sink,
       compressor: create_codec(codec).expect("Codec is supported"),
       dictionary_page_offset: None,
       data_page_offset: None,
@@ -99,11 +103,7 @@ impl SerializedPageWriter {
 
   /// Writes dictionary page into output stream.
   /// Should be written once per column.
-  pub fn write_dictionary_page(
-    &mut self,
-    page: Page,
-    sink: &mut PosWrite
-  ) -> Result<usize> {
+  pub fn write_dictionary_page(&mut self, page: Page) -> Result<usize> {
     match page {
       Page::DictionaryPage { buf, num_values, encoding, is_sorted } => {
         let uncompressed_size = buf.len();
@@ -136,17 +136,17 @@ impl SerializedPageWriter {
           data_page_header_v2: None,
         };
 
-        let start_pos = sink.pos();
+        let start_pos = self.sink.pos();
         assert!(self.dictionary_page_offset.is_none(), "Dictionary page is already set");
         self.dictionary_page_offset = Some(start_pos);
-        let header_size = self.serialize_page_header(page_header, sink)?;
-        sink.write_all(buf.data())?;
+        let header_size = self.serialize_page_header(page_header)?;
+        self.sink.write_all(buf.data())?;
 
         self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
         self.total_compressed_size += (compressed_size + header_size) as u64;
 
         // Return number of bytes written
-        let bytes_written = (sink.pos() - start_pos) as usize;
+        let bytes_written = (self.sink.pos() - start_pos) as usize;
         Ok(bytes_written)
       }
       _ => panic!("Write dictionary page only")
@@ -154,11 +154,7 @@ impl SerializedPageWriter {
   }
 
   /// Writes compressed data page into output stream.
-  pub fn write_data_page(
-    &mut self,
-    page: CompressedPage,
-    sink: &mut PosWrite
-  ) -> Result<usize> {
+  pub fn write_data_page(&mut self, page: CompressedPage) -> Result<usize> {
     let uncompressed_size = page.uncompressed_size();
     let compressed_size = page.compressed_size();
     let num_values = page.num_values();
@@ -213,36 +209,32 @@ impl SerializedPageWriter {
       }
     }
 
-    let start_pos = sink.pos();
+    let start_pos = self.sink.pos();
     if self.data_page_offset.is_none() {
       self.data_page_offset = Some(start_pos);
     }
 
-    let header_size = self.serialize_page_header(page_header, sink)?;
-    sink.write_all(page.data())?;
+    let header_size = self.serialize_page_header(page_header)?;
+    self.sink.write_all(page.data())?;
 
     self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
     self.total_compressed_size += (compressed_size + header_size) as u64;
     self.num_values += num_values as u64;
 
-    let bytes_written = (sink.pos() - start_pos) as usize;
+    let bytes_written = (self.sink.pos() - start_pos) as usize;
     Ok(bytes_written)
   }
 
   /// Serializes page header into Thrift.
-  fn serialize_page_header(
-    &mut self,
-    page_header: PageHeader,
-    sink: &mut PosWrite
-  ) -> Result<usize> {
-    let start_pos = sink.pos();
+  fn serialize_page_header(&mut self, page_header: PageHeader) -> Result<usize> {
+    let start_pos = self.sink.pos();
     {
-      let transport = TOutputStream::new(sink);
+      let transport = TOutputStream::new(&mut self.sink);
       let mut protocol = TCompactOutputProtocol::new(transport);
       page_header.write_to_out_protocol(&mut protocol)?;
       protocol.flush()?;
     }
-    Ok((sink.pos() - start_pos) as usize)
+    Ok((self.sink.pos() - start_pos) as usize)
   }
 }
 

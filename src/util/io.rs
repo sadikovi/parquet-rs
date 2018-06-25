@@ -65,9 +65,11 @@ impl Read for FileChunk {
   }
 }
 
-/// Positional Write trait.
+/// Positional write trait.
+///
 /// Tracks the current position in the stream.
-pub trait PosWrite: Write {
+/// Should be used together with `Write` trait.
+pub trait Position {
   /// Returns the current position in the stream.
   fn pos(&self) -> u64;
 }
@@ -75,11 +77,11 @@ pub trait PosWrite: Write {
 /// Output stream as a thin wrapper for `PosWrite`.
 /// Wraps positional write steam to work as transport in Thrift.
 pub struct TOutputStream<'a> {
-  out: &'a mut PosWrite
+  out: &'a mut Write
 }
 
 impl<'a> TOutputStream<'a> {
-  pub fn new(stream: &'a mut PosWrite) -> Self {
+  pub fn new(stream: &'a mut Write) -> Self {
     Self { out: stream }
   }
 }
