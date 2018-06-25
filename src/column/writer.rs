@@ -42,26 +42,28 @@ pub enum ColumnWriter {
 
 /// Gets a specific column writer corresponding to column descriptor `col_descr`.
 pub fn get_column_writer(
-  col_descr: ColumnDescPtr,
-  col_page_writer: Box<PageWriter>
+  descr: ColumnDescPtr,
+  encoding: Encoding,
+  fallback: Option<Encoding>,
+  page_writer: Box<PageWriter>
 ) -> ColumnWriter {
-  match col_descr.physical_type() {
+  match descr.physical_type() {
     Type::BOOLEAN => ColumnWriter::BoolColumnWriter(
-      ColumnWriterImpl::new(col_descr, col_page_writer)),
+      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
     Type::INT32 => ColumnWriter::Int32ColumnWriter(
-      ColumnWriterImpl::new(col_descr, col_page_writer)),
+      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
     Type::INT64 => ColumnWriter::Int64ColumnWriter(
-      ColumnWriterImpl::new(col_descr, col_page_writer)),
+      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
     Type::INT96 => ColumnWriter::Int96ColumnWriter(
-      ColumnWriterImpl::new(col_descr, col_page_writer)),
+      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
     Type::FLOAT => ColumnWriter::FloatColumnWriter(
-      ColumnWriterImpl::new(col_descr, col_page_writer)),
+      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
     Type::DOUBLE => ColumnWriter::DoubleColumnWriter(
-      ColumnWriterImpl::new(col_descr, col_page_writer)),
+      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
     Type::BYTE_ARRAY => ColumnWriter::ByteArrayColumnWriter(
-      ColumnWriterImpl::new(col_descr, col_page_writer)),
+      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
     Type::FIXED_LEN_BYTE_ARRAY => ColumnWriter::FixedLenByteArrayColumnWriter(
-      ColumnWriterImpl::new(col_descr, col_page_writer))
+      ColumnWriterImpl::new(descr, encoding, fallback, page_writer))
   }
 }
 
@@ -90,43 +92,45 @@ pub struct ColumnWriterImpl<T: DataType> {
   descr: ColumnDescPtr,
   page_writer: Box<PageWriter>,
   dict_encoder: Option<DictEncoder<T>>,
-  encoder: Option<Box<Encoder<T>>>,
-  rows_written: usize
+  encoder: Box<Encoder<T>>,
+  rows_written: usize,
+  def_levels_sink: Vec<i16>,
+  rep_levels_sink: Vec<i16>
 }
 
 impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
-  pub fn new(column_descr: ColumnDescPtr, page_writer: Box<PageWriter>) -> Self {
-    Self {
-      descr: column_descr,
-      page_writer: page_writer,
-      dict_encoder: None,
-      encoder: None,
-      rows_written: 0
-    }
-  }
+  pub fn new(
+    descr: ColumnDescPtr,
+    encoding: Encoding,
+    fallback: Option<Encoding>,
+    page_writer: Box<PageWriter>
+  ) -> Self {
+    let mut curr = encoding;
+    let mut dict_encoder = None;
 
-  /// Sets encoding for column writer.
-  /// If main encoding is dictionary encoding, then fallback is required, otherwise it is
-  /// optional and ignored.
-  pub fn set_encoding(&mut self, encoding: Encoding, fallback: Option<Encoding>) {
-    assert!(self.encoder.is_none(), "Can set encoder(s) only once");
-    let mut current = encoding;
     // Optionally set dictionary encoder.
-    if current == Encoding::RLE_DICTIONARY || current == Encoding::PLAIN_DICTIONARY {
+    if curr == Encoding::RLE_DICTIONARY || curr == Encoding::PLAIN_DICTIONARY {
       assert!(fallback.is_some(), "Dictionary encoding requires a fallback encoding");
-      self.dict_encoder = Some(DictEncoder::new(
-        self.descr.clone(),
-        Rc::new(MemTracker::new())
-      ));
-      current = fallback.unwrap();
+      dict_encoder = Some(DictEncoder::new(descr.clone(), Rc::new(MemTracker::new())));
+      curr = fallback.unwrap();
     }
 
     // Set either main encoder or fallback encoder.
-    self.encoder = Some(get_encoder(
-      self.descr.clone(),
-      current,
+    let fallback_encoder = get_encoder(
+      descr.clone(),
+      curr,
       Rc::new(MemTracker::new())
-    ).unwrap());
+    ).unwrap();
+
+    Self {
+      descr: descr,
+      page_writer: page_writer,
+      dict_encoder: dict_encoder,
+      encoder: fallback_encoder,
+      rows_written: 0,
+      def_levels_sink: vec![],
+      rep_levels_sink: vec![]
+    }
   }
 
   /// Writes batch of values, definition levels and repetition levels.
@@ -169,7 +173,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
         }
       }
 
-      self.write_definition_levels(levels)?;
+      self.write_definition_levels(levels);
     } else {
       values_to_write = values.len();
     }
@@ -192,7 +196,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
         }
       }
 
-      self.write_repetition_levels(levels)?;
+      self.write_repetition_levels(levels);
     } else {
       // Each value is exactly one row
       // Equals to the original number of values, so we count nulls as well
@@ -209,8 +213,17 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     }
 
     // TODO: update page statistics
+    // TODO: keep track of written non-null values and total values.
 
     self.write_values(&values[0..values_to_write])?;
+
+    if self.dict_encoder.is_some() {
+      self.check_dictionary_limit()?;
+    }
+
+    if self.should_add_data_page() {
+      self.add_data_page()?;
+    }
 
     Ok(values_to_write)
   }
@@ -225,15 +238,37 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     unimplemented!();
   }
 
-  fn write_definition_levels(&mut self, def_levels: &[i16]) -> Result<()> {
-    unimplemented!();
+  #[inline]
+  fn write_definition_levels(&mut self, def_levels: &[i16]) {
+    self.def_levels_sink.extend_from_slice(def_levels);
   }
 
-  fn write_repetition_levels(&mut self, rep_levels: &[i16]) -> Result<()> {
-    unimplemented!();
+  #[inline]
+  fn write_repetition_levels(&mut self, rep_levels: &[i16]) {
+    self.rep_levels_sink.extend_from_slice(rep_levels);
   }
 
+  #[inline]
   fn write_values(&mut self, values: &[T::T]) -> Result<()> {
+    match self.dict_encoder {
+      Some(ref mut encoder) => encoder.put(values),
+      None => self.encoder.put(values)
+    }
+  }
+
+  /// Checks if dictionary needs to fall back and performs necessary fallback steps.
+  fn check_dictionary_limit(&mut self) -> Result<()> {
+    unimplemented!();
+  }
+
+  /// Returns true if there is enough data for a data page, false otherwise.
+  fn should_add_data_page(& self) -> bool {
+    unimplemented!();
+  }
+
+  /// Adds data page.
+  /// Data page is either buffered in case of dictionary encoding or written directly.
+  fn add_data_page(&mut self) -> Result<()> {
     unimplemented!();
   }
 }
