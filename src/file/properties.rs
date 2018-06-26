@@ -40,6 +40,7 @@ assert_eq!(props.encoding(&ColumnPath::from("col2")), Encoding::PLAIN);
 */
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use basic::{Compression, Encoding};
 use schema::types::ColumnPath;
@@ -68,12 +69,16 @@ const DEFAULT_MAX_ROW_GROUP_LENGTH: usize = 64 * 1024 * 1024;
 // TODO: Generate default created by string
 const DEFAULT_CREATED_BY: &str = "parquet-rs version x.y.z (build ABC)";
 
+/// Reference counted writer properties.
+pub type WriterPropertiesPtr = Rc<WriterProperties>;
+
 /// Writer properties.
 ///
 /// It is created as an immutable data structure, use [`WriterPropertiesBuilder`] to
 /// assemble the properties.
 #[derive(Debug, Clone)]
 pub struct WriterProperties {
+  data_pagesize_limit: usize,
   dictionary_pagesize_limit: usize,
   write_batch_size: usize,
   max_row_group_length: usize,
@@ -87,6 +92,11 @@ impl WriterProperties {
   /// Returns builder for writer properties.
   pub fn builder() -> WriterPropertiesBuilder {
     WriterPropertiesBuilder::with_defaults()
+  }
+
+  /// Returns data page size limit.
+  pub fn data_pagesize_limit(&self) -> usize {
+    self.data_pagesize_limit
   }
 
   /// Returns dictionary page size limit.
@@ -217,6 +227,7 @@ impl ColumnProperties {
     if value == Encoding::PLAIN_DICTIONARY || value == Encoding::RLE_DICTIONARY {
       panic!("Dictionary encoding can not be used as fallback encoding");
     }
+    // TODO: Check if we need to force PLAIN encoding as dictionary fallback.
     self.encoding = Some(value);
   }
 
@@ -270,6 +281,7 @@ impl ColumnProperties {
 
 /// Writer properties builder.
 pub struct WriterPropertiesBuilder {
+  data_pagesize_limit: usize,
   dictionary_pagesize_limit: usize,
   write_batch_size: usize,
   max_row_group_length: usize,
@@ -283,6 +295,7 @@ impl WriterPropertiesBuilder {
   /// Returns default state of the builder.
   fn with_defaults() -> Self {
     Self {
+      data_pagesize_limit: DEFAULT_PAGE_SIZE,
       dictionary_pagesize_limit: DEFAULT_DICTIONARY_PAGE_SIZE_LIMIT,
       write_batch_size: DEFAULT_WRITE_BATCH_SIZE,
       max_row_group_length: DEFAULT_MAX_ROW_GROUP_LENGTH,
@@ -296,6 +309,7 @@ impl WriterPropertiesBuilder {
   /// Finalizes the configuration and returns immutable writer properties struct.
   pub fn build(self) -> WriterProperties {
     WriterProperties {
+      data_pagesize_limit: self.data_pagesize_limit,
       dictionary_pagesize_limit: self.dictionary_pagesize_limit,
       write_batch_size: self.write_batch_size,
       max_row_group_length: self.max_row_group_length,
@@ -312,6 +326,12 @@ impl WriterPropertiesBuilder {
   /// Sets writer version.
   pub fn set_writer_version(mut self, value: WriterVersion) -> Self {
     self.writer_version = value;
+    self
+  }
+
+  /// Sets data page size limit.
+  pub fn set_data_pagesize_limit(mut self, value: usize) -> Self {
+    self.data_pagesize_limit = value;
     self
   }
 

@@ -20,11 +20,12 @@
 use std::mem;
 use std::rc::Rc;
 
-use basic::{Encoding, Type};
+use basic::Type;
 use column::page::PageWriter;
 use data_type::*;
 use encodings::encoding::{DictEncoder, Encoder, get_encoder};
 use errors::{ParquetError, Result};
+use file::properties::WriterPropertiesPtr;
 use schema::types::ColumnDescPtr;
 use util::memory::MemTracker;
 
@@ -43,27 +44,26 @@ pub enum ColumnWriter {
 /// Gets a specific column writer corresponding to column descriptor `col_descr`.
 pub fn get_column_writer(
   descr: ColumnDescPtr,
-  encoding: Encoding,
-  fallback: Option<Encoding>,
+  props: WriterPropertiesPtr,
   page_writer: Box<PageWriter>
 ) -> ColumnWriter {
   match descr.physical_type() {
     Type::BOOLEAN => ColumnWriter::BoolColumnWriter(
-      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
+      ColumnWriterImpl::new(descr, props, page_writer)),
     Type::INT32 => ColumnWriter::Int32ColumnWriter(
-      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
+      ColumnWriterImpl::new(descr, props, page_writer)),
     Type::INT64 => ColumnWriter::Int64ColumnWriter(
-      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
+      ColumnWriterImpl::new(descr, props, page_writer)),
     Type::INT96 => ColumnWriter::Int96ColumnWriter(
-      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
+      ColumnWriterImpl::new(descr, props, page_writer)),
     Type::FLOAT => ColumnWriter::FloatColumnWriter(
-      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
+      ColumnWriterImpl::new(descr, props, page_writer)),
     Type::DOUBLE => ColumnWriter::DoubleColumnWriter(
-      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
+      ColumnWriterImpl::new(descr, props, page_writer)),
     Type::BYTE_ARRAY => ColumnWriter::ByteArrayColumnWriter(
-      ColumnWriterImpl::new(descr, encoding, fallback, page_writer)),
+      ColumnWriterImpl::new(descr, props, page_writer)),
     Type::FIXED_LEN_BYTE_ARRAY => ColumnWriter::FixedLenByteArrayColumnWriter(
-      ColumnWriterImpl::new(descr, encoding, fallback, page_writer))
+      ColumnWriterImpl::new(descr, props, page_writer))
   }
 }
 
@@ -90,9 +90,12 @@ pub fn get_typed_column_writer<T: DataType>(
 /// Typed column writer for a primitive column.
 pub struct ColumnWriterImpl<T: DataType> {
   descr: ColumnDescPtr,
+  props: WriterPropertiesPtr,
   page_writer: Box<PageWriter>,
   dict_encoder: Option<DictEncoder<T>>,
   encoder: Box<Encoder<T>>,
+  num_buffered_values: usize,
+  num_buffered_encoded_values: usize,
   rows_written: usize,
   def_levels_sink: Vec<i16>,
   rep_levels_sink: Vec<i16>
@@ -101,32 +104,31 @@ pub struct ColumnWriterImpl<T: DataType> {
 impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   pub fn new(
     descr: ColumnDescPtr,
-    encoding: Encoding,
-    fallback: Option<Encoding>,
+    props: WriterPropertiesPtr,
     page_writer: Box<PageWriter>
   ) -> Self {
-    let mut curr = encoding;
-    let mut dict_encoder = None;
-
     // Optionally set dictionary encoder.
-    if curr == Encoding::RLE_DICTIONARY || curr == Encoding::PLAIN_DICTIONARY {
-      assert!(fallback.is_some(), "Dictionary encoding requires a fallback encoding");
-      dict_encoder = Some(DictEncoder::new(descr.clone(), Rc::new(MemTracker::new())));
-      curr = fallback.unwrap();
-    }
+    let dict_encoder = if props.dictionary_enabled(descr.path()) {
+      Some(DictEncoder::new(descr.clone(), Rc::new(MemTracker::new())))
+    } else {
+      None
+    };
 
     // Set either main encoder or fallback encoder.
     let fallback_encoder = get_encoder(
       descr.clone(),
-      curr,
+      props.encoding(descr.path()),
       Rc::new(MemTracker::new())
     ).unwrap();
 
     Self {
       descr: descr,
+      props: props,
       page_writer: page_writer,
       dict_encoder: dict_encoder,
       encoder: fallback_encoder,
+      num_buffered_values: 0,
+      num_buffered_encoded_values: 0,
       rows_written: 0,
       def_levels_sink: vec![],
       rep_levels_sink: vec![]
@@ -142,6 +144,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     def_levels: Option<&[i16]>,
     rep_levels: Option<&[i16]>
   ) -> Result<usize> {
+    let num_values;
     let mut values_to_write = 0;
 
     // Check if number of definition levels is the same as number of repetition levels.
@@ -167,6 +170,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       }
 
       let levels = def_levels.unwrap();
+      num_values = levels.len();
       for &level in levels {
         if level == self.descr.max_def_level() {
           values_to_write += 1;
@@ -176,6 +180,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       self.write_definition_levels(levels);
     } else {
       values_to_write = values.len();
+      num_values = values_to_write;
     }
 
     // Process repetition levels and determine how many rows we are about to process
@@ -213,16 +218,18 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     }
 
     // TODO: update page statistics
-    // TODO: keep track of written non-null values and total values.
 
     self.write_values(&values[0..values_to_write])?;
 
-    if self.dict_encoder.is_some() {
-      self.check_dictionary_limit()?;
-    }
+    self.num_buffered_values += num_values;
+    self.num_buffered_encoded_values += values_to_write;
 
     if self.should_add_data_page() {
       self.add_data_page()?;
+    }
+
+    if self.should_dict_fallback() {
+      self.dict_fallback()?;
     }
 
     Ok(values_to_write)
@@ -231,6 +238,16 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   /// Returns number of rows written so far.
   pub fn rows_written(&self) -> usize {
     self.rows_written
+  }
+
+  /// Returns total number of values that have been buffered so far.
+  pub fn num_buffered_values(&self) -> usize {
+    self.num_buffered_values
+  }
+
+  /// Returns number of non-null values that have been buffered so far.
+  pub fn num_buffered_encoded_values(&self) -> usize {
+    self.num_buffered_encoded_values
   }
 
   /// Finalises writes and closes the column writer.
@@ -256,13 +273,29 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     }
   }
 
-  /// Checks if dictionary needs to fall back and performs necessary fallback steps.
-  fn check_dictionary_limit(&mut self) -> Result<()> {
-    unimplemented!();
+  /// Returns true if we need to fall back to non-dictionary encoding.
+  ///
+  /// We can only fall back if dictionary encoder is set and we have exceeded dictionary
+  /// size.
+  #[inline]
+  fn should_dict_fallback(&self) -> bool {
+    match self.dict_encoder {
+      Some(ref encoder) => {
+        encoder.dict_encoded_size() >= self.props.dictionary_pagesize_limit() as u64
+      },
+      None => false
+    }
   }
 
   /// Returns true if there is enough data for a data page, false otherwise.
-  fn should_add_data_page(& self) -> bool {
+  #[inline]
+  fn should_add_data_page(&self) -> bool {
+    self.encoder.estimated_data_encoded_size() >= self.props.data_pagesize_limit() as u64
+  }
+
+  /// Performs dictionary fallback.
+  /// Prepares and writes dictionary and all data pages into page writer.
+  fn dict_fallback(&mut self) -> Result<()> {
     unimplemented!();
   }
 
