@@ -102,6 +102,86 @@ impl Page {
   }
 }
 
+/// Helper struct to represent pages with potentially compressed buffer or concatenated
+/// buffer (def levels + rep levels + compressed values) for data page v2, so not to
+/// break the assumption that `Page` buffer is uncompressed.
+pub enum CompressedPage {
+  DataPage {
+    uncompressed_size: usize,
+    buf: ByteBufferPtr,
+    num_values: u32,
+    encoding: Encoding,
+    def_level_encoding: Encoding,
+    rep_level_encoding: Encoding,
+    statistics: Option<Statistics>
+  },
+  DataPageV2 {
+    uncompressed_size: usize,
+    buf: ByteBufferPtr,
+    num_values: u32,
+    encoding: Encoding,
+    num_nulls: u32,
+    num_rows: u32,
+    def_levels_byte_len: u32,
+    rep_levels_byte_len: u32,
+    is_compressed: bool,
+    statistics: Option<Statistics>
+  }
+}
+
+impl CompressedPage {
+  /// Returns page type.
+  pub fn page_type(&self) -> PageType {
+    match self {
+      CompressedPage::DataPage { .. } => PageType::DATA_PAGE,
+      CompressedPage::DataPageV2 { .. } => PageType::DATA_PAGE_V2
+    }
+  }
+
+  /// Returns uncompressed size in bytes.
+  pub fn uncompressed_size(&self) -> usize {
+    match *self {
+      CompressedPage::DataPage { uncompressed_size, .. } => uncompressed_size,
+      CompressedPage::DataPageV2 { uncompressed_size, .. } => uncompressed_size
+    }
+  }
+
+  /// Returns compressed size in bytes.
+  ///
+  /// Note that it is assumed that buffer is compressed, but it may not be. In this
+  /// case compressed size will be equal to uncompressed size.
+  pub fn compressed_size(&self) -> usize {
+    match self {
+      CompressedPage::DataPage { buf, .. } => buf.len(),
+      CompressedPage::DataPageV2 { buf, .. } => buf.len()
+    }
+  }
+
+  /// Number of values in the data page.
+  pub fn num_values(&self) -> u32 {
+    match *self {
+      CompressedPage::DataPage { num_values, .. } => num_values,
+      CompressedPage::DataPageV2 { num_values, .. } => num_values
+    }
+  }
+
+  /// Returns encoding for values in the data page.
+  pub fn encoding(&self) -> Encoding {
+    match *self {
+      CompressedPage::DataPage { encoding, .. } => encoding,
+      CompressedPage::DataPageV2 { encoding, .. } => encoding
+    }
+  }
+
+  /// Returns slice of compressed buffer in data page.
+  pub fn data(&self) -> &[u8] {
+    match self {
+      CompressedPage::DataPage { buf, .. } => buf.data(),
+      CompressedPage::DataPageV2 { buf, .. } => buf.data()
+    }
+  }
+}
+
 /// API for reading pages from a column chunk.
 /// This offers a iterator like API to get the next page.
 pub trait PageReader {
@@ -115,16 +195,17 @@ pub trait PageWriter {
   /// Returns `true` if page writer has a compression set.
   fn has_compressor(&self) -> bool;
 
+  /// Compresses input buffer bytes into output buffer.
+  /// Fails if compressor is not set.
+  fn compress(&mut self, input_buf: &[u8], output_buf: &mut Vec<u8>) -> Result<()>;
+
   /// Writes data page into the output stream/sink.
-  /// Data page is always passed uncompressed, so page writer has a compression codec,
-  /// page should be compressed accordingly.
-  fn write_data_page(&mut self, page: Page) -> Result<()>;
+  /// Returns number of bytes written into the sink.
+  fn write_data_page(&mut self, page: CompressedPage) -> Result<usize>;
 
   /// Writes dictionary page into the output stream/sink.
-  fn write_dictionary_page(&mut self, page: Page) -> Result<()>;
-
-  /// Closes page writer and updates metadata if needed.
-  fn close(&mut self, has_dictionary: bool, fallback: bool) -> Result<()>;
+  /// Returns number of bytes written into the sink.
+  fn write_dictionary_page(&mut self, page: Page) -> Result<usize>;
 }
 
 #[cfg(test)]

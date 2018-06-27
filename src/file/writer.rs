@@ -19,15 +19,16 @@
 
 use std::io::Write;
 
-use basic::{Compression, Encoding, PageType};
-use column::page::Page;
+use basic::{Compression, PageType};
+use column::page::{CompressedPage, Page};
 use compression::{Codec, create_codec};
 use errors::Result;
-use file::statistics::Statistics;
 use parquet_format::{DataPageHeader, DataPageHeaderV2, DictionaryPageHeader, PageHeader};
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
 use util::io::{Position, TOutputStream};
 use util::memory::ByteBufferPtr;
+
+// TODO: Clean up metrics that we collect in page writer, see if we actually use any.
 
 /// Serialized page writer.
 ///
@@ -235,85 +236,5 @@ impl<T: Write + Position> SerializedPageWriter<T> {
       protocol.flush()?;
     }
     Ok((self.sink.pos() - start_pos) as usize)
-  }
-}
-
-/// Helper struct to represent pages with potentially compressed buffer or concatenated
-/// buffer (def levels + rep levels + compressed values) for data page v2, so not to
-/// break the assumption that `Page` buffer is uncompressed.
-pub enum CompressedPage {
-  DataPage {
-    uncompressed_size: usize,
-    buf: ByteBufferPtr,
-    num_values: u32,
-    encoding: Encoding,
-    def_level_encoding: Encoding,
-    rep_level_encoding: Encoding,
-    statistics: Option<Statistics>
-  },
-  DataPageV2 {
-    uncompressed_size: usize,
-    buf: ByteBufferPtr,
-    num_values: u32,
-    encoding: Encoding,
-    num_nulls: u32,
-    num_rows: u32,
-    def_levels_byte_len: u32,
-    rep_levels_byte_len: u32,
-    is_compressed: bool,
-    statistics: Option<Statistics>
-  }
-}
-
-impl CompressedPage {
-  /// Returns page type.
-  pub fn page_type(&self) -> PageType {
-    match self {
-      CompressedPage::DataPage { .. } => PageType::DATA_PAGE,
-      CompressedPage::DataPageV2 { .. } => PageType::DATA_PAGE_V2
-    }
-  }
-
-  /// Returns uncompressed size in bytes.
-  pub fn uncompressed_size(&self) -> usize {
-    match *self {
-      CompressedPage::DataPage { uncompressed_size, .. } => uncompressed_size,
-      CompressedPage::DataPageV2 { uncompressed_size, .. } => uncompressed_size
-    }
-  }
-
-  /// Returns compressed size in bytes.
-  ///
-  /// Note that it is assumed that buffer is compressed, but it may not be. In this
-  /// case compressed size will be equal to uncompressed size.
-  pub fn compressed_size(&self) -> usize {
-    match self {
-      CompressedPage::DataPage { buf, .. } => buf.len(),
-      CompressedPage::DataPageV2 { buf, .. } => buf.len()
-    }
-  }
-
-  /// Number of values in the data page.
-  pub fn num_values(&self) -> u32 {
-    match *self {
-      CompressedPage::DataPage { num_values, .. } => num_values,
-      CompressedPage::DataPageV2 { num_values, .. } => num_values
-    }
-  }
-
-  /// Returns encoding for values in the data page.
-  pub fn encoding(&self) -> Encoding {
-    match *self {
-      CompressedPage::DataPage { encoding, .. } => encoding,
-      CompressedPage::DataPageV2 { encoding, .. } => encoding
-    }
-  }
-
-  /// Returns slice of compressed buffer in data page.
-  pub fn data(&self) -> &[u8] {
-    match self {
-      CompressedPage::DataPage { buf, .. } => buf.data(),
-      CompressedPage::DataPageV2 { buf, .. } => buf.data()
-    }
   }
 }

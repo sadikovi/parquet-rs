@@ -20,14 +20,15 @@
 use std::mem;
 use std::rc::Rc;
 
-use basic::Type;
-use column::page::PageWriter;
+use basic::{Encoding, Type};
+use column::page::{CompressedPage, PageWriter};
 use data_type::*;
 use encodings::encoding::{DictEncoder, Encoder, get_encoder};
+use encodings::levels::LevelEncoder;
 use errors::{ParquetError, Result};
-use file::properties::WriterPropertiesPtr;
+use file::properties::{WriterPropertiesPtr, WriterVersion};
 use schema::types::ColumnDescPtr;
-use util::memory::MemTracker;
+use util::memory::{ByteBufferPtr, MemTracker};
 
 /// Column writer for a Parquet type.
 pub enum ColumnWriter {
@@ -97,8 +98,10 @@ pub struct ColumnWriterImpl<T: DataType> {
   num_buffered_values: usize,
   num_buffered_encoded_values: usize,
   rows_written: usize,
+  total_bytes_written: u64,
   def_levels_sink: Vec<i16>,
-  rep_levels_sink: Vec<i16>
+  rep_levels_sink: Vec<i16>,
+  data_pages: Vec<CompressedPage>
 }
 
 impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
@@ -130,8 +133,10 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       num_buffered_values: 0,
       num_buffered_encoded_values: 0,
       rows_written: 0,
+      total_bytes_written: 0,
       def_levels_sink: vec![],
-      rep_levels_sink: vec![]
+      rep_levels_sink: vec![],
+      data_pages: vec![]
     }
   }
 
@@ -302,6 +307,125 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   /// Adds data page.
   /// Data page is either buffered in case of dictionary encoding or written directly.
   fn add_data_page(&mut self) -> Result<()> {
-    unimplemented!();
+    // Extract encoded values
+    let values = match self.dict_encoder {
+      Some(ref mut encoder) => encoder.write_indices()?,
+      None => self.encoder.flush_buffer()?
+    };
+
+    // Encode definition levels (always RLE)
+    let def_levels = if self.descr.max_def_level() > 0 {
+      self.encode_levels(
+        Encoding::RLE,
+        &self.def_levels_sink[..],
+        self.descr.max_def_level()
+      )?
+    } else {
+      vec![]
+    };
+
+    // Encode repetition levels (always RLE)
+    let mut rep_levels = if self.descr.max_rep_level() > 0 {
+      self.encode_levels(
+        Encoding::RLE,
+        &self.rep_levels_sink[..],
+        self.descr.max_rep_level()
+      )?
+    } else {
+      vec![]
+    };
+
+    // Encoded length of repetition levels
+    let rep_levels_byte_len = rep_levels.len();
+    // Encoded length of definition levels
+    let def_levels_byte_len = def_levels.len();
+    // Uncompressed length in bytes, compressed length depends on writer version
+    let uncompressed_size = rep_levels_byte_len + def_levels_byte_len + values.len();
+    // Select encoding based on current encoder and writer version (v1 or v2)
+    let encoding = if self.dict_encoder.is_some() {
+      self.props.data_page_dictionary_encoding()
+    } else {
+      self.encoder.encoding()
+    };
+    // Whether or not we use compressor for values
+    let is_compressed = self.page_writer.has_compressor();
+
+    let compressed_page = if self.props.writer_version() == WriterVersion::PARQUET_1_0 {
+      // Process as data page v1
+      rep_levels.extend_from_slice(&def_levels[..]);
+      rep_levels.extend_from_slice(values.data());
+      let buffer = if is_compressed {
+        // TODO: figure out capacity for the compressed buffer
+        let mut compressed_buf = Vec::with_capacity(rep_levels.len() / 2);
+        self.page_writer.compress(&rep_levels[..], &mut compressed_buf)?;
+        compressed_buf
+      } else {
+        rep_levels
+      };
+
+      CompressedPage::DataPage {
+        uncompressed_size: uncompressed_size,
+        buf: ByteBufferPtr::new(buffer),
+        num_values: self.num_buffered_values as u32,
+        encoding: encoding,
+        def_level_encoding: Encoding::RLE,
+        rep_level_encoding: Encoding::RLE,
+        statistics: None
+      }
+    } else {
+      // Process as data page v2
+      let mut compressed_values = Vec::with_capacity(values.len());
+      if is_compressed {
+        self.page_writer.compress(values.data(), &mut compressed_values)?;
+      } else {
+        compressed_values.extend_from_slice(values.data());
+      }
+      rep_levels.extend_from_slice(&def_levels[..]);
+      rep_levels.extend_from_slice(&compressed_values[..]);
+      let buffer = rep_levels;
+
+      CompressedPage::DataPageV2 {
+        uncompressed_size: uncompressed_size,
+        buf: ByteBufferPtr::new(buffer),
+        num_values: self.num_buffered_values as u32,
+        encoding: encoding,
+        num_nulls: (self.num_buffered_values - self.num_buffered_encoded_values) as u32,
+        num_rows: self.rows_written as u32,
+        def_levels_byte_len: def_levels_byte_len as u32,
+        rep_levels_byte_len: rep_levels_byte_len as u32,
+        is_compressed: is_compressed,
+        statistics: None
+      }
+    };
+
+    // Check if we need to buffer data page or flush it to the sink directly
+    if self.dict_encoder.is_some() {
+      self.data_pages.push(compressed_page);
+    } else {
+      self.total_bytes_written +=
+        self.page_writer.write_data_page(compressed_page)? as u64;
+    }
+
+    // Reset state
+    self.rep_levels_sink.clear();
+    self.def_levels_sink.clear();
+    self.num_buffered_values = 0;
+    self.num_buffered_encoded_values = 0;
+    self.rows_written = 0;
+
+    Ok(())
+  }
+
+  #[inline]
+  fn encode_levels(
+    &self,
+    encoding: Encoding,
+    levels: &[i16],
+    max_level: i16
+  ) -> Result<Vec<u8>> {
+    let size = LevelEncoder::max_buffer_size(encoding, max_level, levels.len());
+    let mut encoder = LevelEncoder::new(encoding, max_level, vec![0; size]);
+    encoder.put(&levels)?;
+    encoder.consume()
   }
 }
