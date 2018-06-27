@@ -21,7 +21,7 @@ use std::mem;
 use std::rc::Rc;
 
 use basic::{Encoding, Type};
-use column::page::{CompressedPage, PageWriter};
+use column::page::{CompressedPage, Page, PageWriter};
 use data_type::*;
 use encodings::encoding::{DictEncoder, Encoder, get_encoder};
 use encodings::levels::LevelEncoder;
@@ -256,7 +256,8 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   }
 
   /// Finalises writes and closes the column writer.
-  pub fn close(self) -> Result<()> {
+  /// Returns total number of bytes written by this column writer.
+  pub fn close(self) -> Result<u64> {
     unimplemented!();
   }
 
@@ -301,7 +302,11 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   /// Performs dictionary fallback.
   /// Prepares and writes dictionary and all data pages into page writer.
   fn dict_fallback(&mut self) -> Result<()> {
-    unimplemented!();
+    // At this point we know that we need to fall back.
+    self.write_dictionary_page()?;
+    self.flush_buffered_data_pages()?;
+    self.dict_encoder = None;
+    Ok(())
   }
 
   /// Adds data page.
@@ -402,8 +407,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     if self.dict_encoder.is_some() {
       self.data_pages.push(compressed_page);
     } else {
-      self.total_bytes_written +=
-        self.page_writer.write_data_page(compressed_page)? as u64;
+      self.write_data_page(compressed_page)?;
     }
 
     // Reset state
@@ -416,6 +420,12 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     Ok(())
   }
 
+  /// Flushes buffered data pages from dictionary encoding into underlying sink.
+  fn flush_buffered_data_pages(&mut self) -> Result<()> {
+    unimplemented!();
+  }
+
+  /// Encodes definition or repetition levels.
   #[inline]
   fn encode_levels(
     &self,
@@ -427,5 +437,35 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     let mut encoder = LevelEncoder::new(encoding, max_level, vec![0; size]);
     encoder.put(&levels)?;
     encoder.consume()
+  }
+
+  /// Writes compressed data page into underlying sink.
+  #[inline]
+  fn write_data_page(&mut self, page: CompressedPage) -> Result<()> {
+    self.total_bytes_written += self.page_writer.write_data_page(page)? as u64;
+    Ok(())
+  }
+
+  /// Writes dictionary page into underlying sink.
+  /// Dictionary encoder should not be used afterwards.
+  #[inline]
+  fn write_dictionary_page(&mut self) -> Result<()> {
+    match self.dict_encoder {
+      Some(ref encoder) => {
+        let num_values = encoder.num_entries() as u32;
+        let buf = encoder.write_dict()?;
+        let page = Page::DictionaryPage {
+          buf: buf,
+          num_values: num_values,
+          encoding: self.props.dictionary_page_encoding(),
+          // TODO: is our dictionary data sorted?
+          is_sorted: false
+        };
+        self.total_bytes_written +=
+          self.page_writer.write_dictionary_page(page)? as u64;
+        Ok(())
+      },
+      None => Err(general_err!("Dictionary encoder is not set"))
+    }
   }
 }
