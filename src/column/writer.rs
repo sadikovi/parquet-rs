@@ -17,6 +17,7 @@
 
 //! Contains column writer API.
 
+use std::collections::VecDeque;
 use std::mem;
 use std::rc::Rc;
 
@@ -101,7 +102,7 @@ pub struct ColumnWriterImpl<T: DataType> {
   total_bytes_written: u64,
   def_levels_sink: Vec<i16>,
   rep_levels_sink: Vec<i16>,
-  data_pages: Vec<CompressedPage>
+  data_pages: VecDeque<CompressedPage>
 }
 
 impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
@@ -136,7 +137,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       total_bytes_written: 0,
       def_levels_sink: vec![],
       rep_levels_sink: vec![],
-      data_pages: vec![]
+      data_pages: VecDeque::new()
     }
   }
 
@@ -257,8 +258,13 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
 
   /// Finalises writes and closes the column writer.
   /// Returns total number of bytes written by this column writer.
-  pub fn close(self) -> Result<u64> {
-    unimplemented!();
+  pub fn close(mut self) -> Result<u64> {
+    if self.dict_encoder.is_some() {
+      self.write_dictionary_page()?;
+      self.dict_encoder = None;
+    }
+    self.flush_data_pages()?;
+    Ok(self.total_bytes_written)
   }
 
   #[inline]
@@ -304,7 +310,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   fn dict_fallback(&mut self) -> Result<()> {
     // At this point we know that we need to fall back.
     self.write_dictionary_page()?;
-    self.flush_buffered_data_pages()?;
+    self.flush_data_pages()?;
     self.dict_encoder = None;
     Ok(())
   }
@@ -405,7 +411,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
 
     // Check if we need to buffer data page or flush it to the sink directly
     if self.dict_encoder.is_some() {
-      self.data_pages.push(compressed_page);
+      self.data_pages.push_back(compressed_page);
     } else {
       self.write_data_page(compressed_page)?;
     }
@@ -420,9 +426,19 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     Ok(())
   }
 
-  /// Flushes buffered data pages from dictionary encoding into underlying sink.
-  fn flush_buffered_data_pages(&mut self) -> Result<()> {
-    unimplemented!();
+  /// Finalises any outstanding data pages and flushes buffered data pages from
+  /// dictionary encoding into underlying sink.
+  fn flush_data_pages(&mut self) -> Result<()> {
+    // Write all outstanding data to a new page
+    if self.num_buffered_values > 0 {
+      self.add_data_page()?;
+    }
+
+    while let Some(page) = self.data_pages.pop_front() {
+      self.write_data_page(page)?;
+    }
+
+    Ok(())
   }
 
   /// Encodes definition or repetition levels.
