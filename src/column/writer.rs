@@ -241,21 +241,6 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     Ok(values_to_write)
   }
 
-  /// Returns number of rows written so far.
-  pub fn rows_written(&self) -> usize {
-    self.rows_written
-  }
-
-  /// Returns total number of values that have been buffered so far.
-  pub fn num_buffered_values(&self) -> usize {
-    self.num_buffered_values
-  }
-
-  /// Returns number of non-null values that have been buffered so far.
-  pub fn num_buffered_encoded_values(&self) -> usize {
-    self.num_buffered_encoded_values
-  }
-
   /// Finalises writes and closes the column writer.
   /// Returns total number of bytes written by this column writer.
   pub fn close(mut self) -> Result<u64> {

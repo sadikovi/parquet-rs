@@ -20,7 +20,7 @@
 use std::io::Write;
 
 use basic::{Compression, PageType};
-use column::page::{CompressedPage, Page};
+use column::page::{CompressedPage, Page, PageWriter};
 use compression::{Codec, create_codec};
 use errors::Result;
 use parquet_format::{DataPageHeader, DataPageHeaderV2, DictionaryPageHeader, PageHeader};
@@ -88,74 +88,32 @@ impl<T: Write + Position> SerializedPageWriter<T> {
     self.num_values
   }
 
-  /// Returns true, if page writer has a compressor set.
+  /// Serializes page header into Thrift.
+  fn serialize_page_header(&mut self, page_header: PageHeader) -> Result<usize> {
+    let start_pos = self.sink.pos();
+    {
+      let transport = TOutputStream::new(&mut self.sink);
+      let mut protocol = TCompactOutputProtocol::new(transport);
+      page_header.write_to_out_protocol(&mut protocol)?;
+      protocol.flush()?;
+    }
+    Ok((self.sink.pos() - start_pos) as usize)
+  }
+}
+
+impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
   #[inline]
-  pub fn has_compressor(&self) -> bool {
+  fn has_compressor(&self) -> bool {
     self.compressor.is_some()
   }
 
-  /// Compresses input buffer bytes into output buffer.
-  /// Fails if compressor is not set.
   #[inline]
-  pub fn compress(&mut self, input_buf: &[u8], output_buf: &mut Vec<u8>) -> Result<()> {
+  fn compress(&mut self, input_buf: &[u8], output_buf: &mut Vec<u8>) -> Result<()> {
     assert!(self.has_compressor());
     self.compressor.as_mut().unwrap().compress(input_buf, output_buf)
   }
 
-  /// Writes dictionary page into output stream.
-  /// Should be written once per column.
-  pub fn write_dictionary_page(&mut self, page: Page) -> Result<usize> {
-    match page {
-      Page::DictionaryPage { buf, num_values, encoding, is_sorted } => {
-        let uncompressed_size = buf.len();
-        let buf = if self.has_compressor() {
-          // TODO: reuse output buffer?
-          let mut output_buf = Vec::with_capacity(uncompressed_size);
-          self.compress(buf.data(), &mut output_buf)?;
-          ByteBufferPtr::new(output_buf)
-        } else {
-          buf
-        };
-        let compressed_size = buf.len();
-
-        // Create page headers
-        let dictionary_page_header = DictionaryPageHeader {
-          num_values: num_values as i32,
-          encoding: encoding.into(),
-          is_sorted: Some(is_sorted)
-        };
-
-        let page_header = PageHeader {
-          type_: PageType::DICTIONARY_PAGE.into(),
-          uncompressed_page_size: uncompressed_size as i32,
-          compressed_page_size: compressed_size as i32,
-          // TODO: Add support for crc checksum
-          crc: None,
-          data_page_header: None,
-          index_page_header: None,
-          dictionary_page_header: Some(dictionary_page_header),
-          data_page_header_v2: None,
-        };
-
-        let start_pos = self.sink.pos();
-        assert!(self.dictionary_page_offset.is_none(), "Dictionary page is already set");
-        self.dictionary_page_offset = Some(start_pos);
-        let header_size = self.serialize_page_header(page_header)?;
-        self.sink.write_all(buf.data())?;
-
-        self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
-        self.total_compressed_size += (compressed_size + header_size) as u64;
-
-        // Return number of bytes written
-        let bytes_written = (self.sink.pos() - start_pos) as usize;
-        Ok(bytes_written)
-      }
-      _ => panic!("Write dictionary page only")
-    }
-  }
-
-  /// Writes compressed data page into output stream.
-  pub fn write_data_page(&mut self, page: CompressedPage) -> Result<usize> {
+  fn write_data_page(&mut self, page: CompressedPage) -> Result<usize> {
     let uncompressed_size = page.uncompressed_size();
     let compressed_size = page.compressed_size();
     let num_values = page.num_values();
@@ -226,15 +184,53 @@ impl<T: Write + Position> SerializedPageWriter<T> {
     Ok(bytes_written)
   }
 
-  /// Serializes page header into Thrift.
-  fn serialize_page_header(&mut self, page_header: PageHeader) -> Result<usize> {
-    let start_pos = self.sink.pos();
-    {
-      let transport = TOutputStream::new(&mut self.sink);
-      let mut protocol = TCompactOutputProtocol::new(transport);
-      page_header.write_to_out_protocol(&mut protocol)?;
-      protocol.flush()?;
+  fn write_dictionary_page(&mut self, page: Page) -> Result<usize> {
+    match page {
+      Page::DictionaryPage { buf, num_values, encoding, is_sorted } => {
+        let uncompressed_size = buf.len();
+        let buf = if self.has_compressor() {
+          // TODO: reuse output buffer?
+          let mut output_buf = Vec::with_capacity(uncompressed_size);
+          self.compress(buf.data(), &mut output_buf)?;
+          ByteBufferPtr::new(output_buf)
+        } else {
+          buf
+        };
+        let compressed_size = buf.len();
+
+        // Create page headers
+        let dictionary_page_header = DictionaryPageHeader {
+          num_values: num_values as i32,
+          encoding: encoding.into(),
+          is_sorted: Some(is_sorted)
+        };
+
+        let page_header = PageHeader {
+          type_: PageType::DICTIONARY_PAGE.into(),
+          uncompressed_page_size: uncompressed_size as i32,
+          compressed_page_size: compressed_size as i32,
+          // TODO: Add support for crc checksum
+          crc: None,
+          data_page_header: None,
+          index_page_header: None,
+          dictionary_page_header: Some(dictionary_page_header),
+          data_page_header_v2: None,
+        };
+
+        let start_pos = self.sink.pos();
+        assert!(self.dictionary_page_offset.is_none(), "Dictionary page is already set");
+        self.dictionary_page_offset = Some(start_pos);
+        let header_size = self.serialize_page_header(page_header)?;
+        self.sink.write_all(buf.data())?;
+
+        self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
+        self.total_compressed_size += (compressed_size + header_size) as u64;
+
+        // Return number of bytes written
+        let bytes_written = (self.sink.pos() - start_pos) as usize;
+        Ok(bytes_written)
+      }
+      _ => panic!("Write dictionary page only")
     }
-    Ok((self.sink.pos() - start_pos) as usize)
   }
 }
