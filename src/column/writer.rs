@@ -17,6 +17,7 @@
 
 //! Contains column writer API.
 
+use std::cmp;
 use std::collections::VecDeque;
 use std::mem;
 use std::rc::Rc;
@@ -150,6 +151,71 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     def_levels: Option<&[i16]>,
     rep_levels: Option<&[i16]>
   ) -> Result<usize> {
+    // We check for DataPage limits only after we have inserted the values. If a user
+    // writes a large number of values, the DataPage size can be well above the limit.
+    //
+    // The purpose of this chunking is to bound this. Even if a user writes large number
+    // of values, the chunking will ensure that we add data page at a reasonable pagesize
+    // limit.
+
+    // TODO: find out why we don't account for size of levels when we estimate page size.
+
+    // Find out the minimal length to prevent index out of bound errors
+    let mut min_len = values.len();
+    if let Some(levels) = def_levels {
+      min_len = cmp::min(min_len, levels.len());
+    }
+    if let Some(levels) = rep_levels {
+      min_len = cmp::min(min_len, levels.len());
+    }
+
+    // Find out number of batches to process
+    let write_batch_size = self.props.write_batch_size();
+    let num_batches = min_len / write_batch_size;
+
+    let mut values_offset = 0;
+    let mut levels_offset = 0;
+
+    for _ in 0..num_batches {
+      values_offset += self.write_mini_batch(
+        &values[values_offset..values_offset + write_batch_size],
+        def_levels.map(|lv| &lv[levels_offset..levels_offset + write_batch_size]),
+        rep_levels.map(|lv| &lv[levels_offset..levels_offset + write_batch_size])
+      )?;
+      levels_offset += write_batch_size;
+    }
+
+    values_offset += self.write_mini_batch(
+      &values[values_offset..],
+      def_levels.map(|lv| &lv[levels_offset..]),
+      rep_levels.map(|lv| &lv[levels_offset..])
+    )?;
+
+    // Return total number of values processed.
+    Ok(values_offset)
+  }
+
+  /// Finalises writes and closes the column writer.
+  /// Returns total number of bytes written by this column writer.
+  pub fn close(mut self) -> Result<u64> {
+    if self.dict_encoder.is_some() {
+      self.write_dictionary_page()?;
+      self.dict_encoder = None;
+    }
+    self.flush_data_pages()?;
+    Ok(self.total_bytes_written)
+  }
+
+
+  /// Writes mini batch of values, definition and repetition levels.
+  /// This allows fine-grained processing of values and maintaining a reasonable
+  /// page size.
+  fn write_mini_batch(
+    &mut self,
+    values: &[T::T],
+    def_levels: Option<&[i16]>,
+    rep_levels: Option<&[i16]>
+  ) -> Result<usize> {
     let num_values;
     let mut values_to_write = 0;
 
@@ -239,17 +305,6 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     }
 
     Ok(values_to_write)
-  }
-
-  /// Finalises writes and closes the column writer.
-  /// Returns total number of bytes written by this column writer.
-  pub fn close(mut self) -> Result<u64> {
-    if self.dict_encoder.is_some() {
-      self.write_dictionary_page()?;
-      self.dict_encoder = None;
-    }
-    self.flush_data_pages()?;
-    Ok(self.total_bytes_written)
   }
 
   #[inline]
