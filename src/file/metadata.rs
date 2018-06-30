@@ -387,3 +387,111 @@ impl ColumnChunkMetaData {
     Ok(result)
   }
 }
+
+// Builder for column chunk metadata.
+pub struct ColumnChunkMetaDataBuilder {
+  column_descr: ColumnDescPtr,
+  encodings: Vec<Encoding>,
+  file_path: Option<String>,
+  file_offset: i64,
+  num_values: i64,
+  compression: Compression,
+  total_compressed_size: i64,
+  total_uncompressed_size: i64,
+  data_page_offset: i64,
+  index_page_offset: Option<i64>,
+  dictionary_page_offset: Option<i64>,
+  statistics: Option<Statistics>
+}
+
+impl ColumnChunkMetaDataBuilder {
+  pub fn new(column_descr: ColumnDescPtr) -> Self {
+    Self {
+      column_descr: column_descr,
+      encodings: Vec::new(),
+      file_path: None,
+      file_offset: 0,
+      num_values: 0,
+      compression: Compression::UNCOMPRESSED,
+      total_compressed_size: 0,
+      total_uncompressed_size: 0,
+      data_page_offset: 0,
+      index_page_offset: None,
+      dictionary_page_offset: None,
+      statistics: None
+    }
+  }
+
+  /// Sets list of encodings for this column chunk.
+  pub fn set_encodings(mut self, encodings: Vec<Encoding>) -> Self {
+    self.encodings = encodings;
+    self
+  }
+
+  /// Sets optional file path for this column chunk.
+  pub fn set_file_path(mut self, value: String) -> Self {
+    self.file_path = Some(value);
+    self
+  }
+
+  /// Sets file offset in bytes.
+  pub fn set_file_offset(mut self, value: i64) -> Self {
+    self.file_offset = value;
+    self
+  }
+
+  /// Sets number of values.
+  pub fn set_num_values(mut self, value: i64) -> Self {
+    self.num_values = value;
+    self
+  }
+
+  /// Sets compression.
+  pub fn set_compression(mut self, value: Compression) -> Self {
+    self.compression = value;
+    self
+  }
+
+  /// Sets total compressed size in bytes.
+  pub fn set_total_compressed_size(mut self, value: i64) -> Self {
+    self.total_compressed_size = value;
+    self
+  }
+
+  pub fn set_total_uncompressed_size(mut self, value: i64) -> Self {
+    self.total_uncompressed_size = value;
+    self
+  }
+
+  /// Sets data page offset in bytes.
+  pub fn set_data_page_offset(mut self, value: i64) -> Self {
+    self.data_page_offset = value;
+    self
+  }
+
+  /// Sets optional dictionary page ofset in bytes.
+  pub fn set_dictionary_page_offset(mut self, value: Option<i64>) -> Self {
+    self.dictionary_page_offset = value;
+    self
+  }
+
+  /// Builds column chunk metadata.
+  pub fn build(self) -> ColumnChunkMetaData {
+    ColumnChunkMetaData {
+      column_type: self.column_descr.physical_type(),
+      column_path: self.column_descr.path().clone(),
+      column_descr: self.column_descr,
+      encodings: self.encodings,
+      file_path: self.file_path,
+      file_offset: self.file_offset,
+      num_values: self.num_values,
+      compression: self.compression,
+      total_compressed_size: self.total_compressed_size,
+      total_uncompressed_size: self.total_uncompressed_size,
+      data_page_offset: self.data_page_offset,
+      index_page_offset: None,
+      dictionary_page_offset: self.dictionary_page_offset,
+      statistics: None
+    }
+  }
+}

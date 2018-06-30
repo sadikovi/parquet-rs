@@ -24,11 +24,12 @@ use std::rc::Rc;
 
 use basic::{Compression, Encoding, Type};
 use column::page::{CompressedPage, Page, PageWriter};
+use compression::{Codec, create_codec};
 use data_type::*;
 use encodings::encoding::{DictEncoder, Encoder, get_encoder};
 use encodings::levels::LevelEncoder;
 use errors::{ParquetError, Result};
-use file::metadata::{ColumnChunkMetaData, ColumnChunkMetaDataPtr};
+use file::metadata::{ColumnChunkMetaDataBuilder, ColumnChunkMetaDataPtr};
 use file::properties::{WriterPropertiesPtr, WriterVersion};
 use schema::types::ColumnDescPtr;
 use util::memory::{ByteBufferPtr, MemTracker};
@@ -102,6 +103,8 @@ pub struct ColumnWriterImpl<T: DataType> {
   has_dictionary: bool,
   dict_encoder: Option<DictEncoder<T>>,
   encoder: Box<Encoder<T>>,
+  codec: Compression,
+  compressor: Option<Box<Codec>>,
   num_buffered_values: usize,
   num_buffered_encoded_values: usize,
   rows_written: usize,
@@ -117,6 +120,9 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     props: WriterPropertiesPtr,
     page_writer: Box<PageWriter>
   ) -> Self {
+    let codec = props.compression(descr.path());
+    let compressor = create_codec(codec).unwrap();
+
     // Optionally set dictionary encoder.
     let dict_encoder = if props.dictionary_enabled(descr.path()) {
       Some(DictEncoder::new(descr.clone(), Rc::new(MemTracker::new())))
@@ -142,6 +148,8 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       has_dictionary: has_dictionary,
       dict_encoder: dict_encoder,
       encoder: fallback_encoder,
+      codec: codec,
+      compressor: compressor,
       num_buffered_values: 0,
       num_buffered_encoded_values: 0,
       rows_written: 0,
@@ -431,20 +439,19 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     } else {
       self.encoder.encoding()
     };
-    // Whether or not we use compressor for values
-    let is_compressed = self.page_writer.has_compressor();
 
     let compressed_page = if self.props.writer_version() == WriterVersion::PARQUET_1_0 {
       // Process as data page v1
       rep_levels.extend_from_slice(&def_levels[..]);
       rep_levels.extend_from_slice(values.data());
-      let buffer = if is_compressed {
-        // TODO: figure out capacity for the compressed buffer
-        let mut compressed_buf = Vec::with_capacity(rep_levels.len() / 2);
-        self.page_writer.compress(&rep_levels[..], &mut compressed_buf)?;
-        compressed_buf
-      } else {
-        rep_levels
+      let buffer = match self.compressor {
+        Some(ref mut cmpr) => {
+          // TODO: figure out capacity for the compressed buffer
+          let mut compressed_buf = Vec::with_capacity(rep_levels.len() / 2);
+          cmpr.compress(&rep_levels[..], &mut compressed_buf)?;
+          compressed_buf
+        }
+        None => rep_levels
       };
 
       CompressedPage::DataPage {
@@ -460,10 +467,9 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     } else {
       // Process as data page v2
       let mut compressed_values = Vec::with_capacity(values.len());
-      if is_compressed {
-        self.page_writer.compress(values.data(), &mut compressed_values)?;
-      } else {
-        compressed_values.extend_from_slice(values.data());
+      match self.compressor {
+        Some(ref mut cmpr) => cmpr.compress(values.data(), &mut compressed_values)?,
+        None => compressed_values.extend_from_slice(values.data())
       }
       rep_levels.extend_from_slice(&def_levels[..]);
       rep_levels.extend_from_slice(&compressed_values[..]);
@@ -478,7 +484,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
         num_rows: self.rows_written as u32,
         def_levels_byte_len: def_levels_byte_len as u32,
         rep_levels_byte_len: rep_levels_byte_len as u32,
-        is_compressed: is_compressed,
+        is_compressed: self.compressor.is_some(),
         // TODO: process statistics
         statistics: None
       }
@@ -526,7 +532,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     // If data page offset is not set, then no pages have been written
     let data_page_offset = self.page_writer.data_page_offset().unwrap_or(0) as i64;
 
-    let mut file_offset = 0i64;
+    let file_offset;
     let mut encodings = Vec::new();
 
     if self.has_dictionary {
@@ -544,29 +550,19 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       encodings.push(self.encoder.encoding());
     }
 
-    /*
-    let meta = ColumnChunkMetaData {
-      column_type: self.descr.physical_type().into(),
-      column_path: self.descr.path().clone(),
-      column_descr: self.descr.clone(),
-      encodings: encodings,
-      file_path: None,
-      file_offset: file_offset,
-      num_values: num_values,
-      // TODO: update compression
-      compression: Compression::UNCOMPRESSED,
-      total_compressed_size: total_compressed_size,
-      total_uncompressed_size: total_uncompressed_size,
-      data_page_offset: data_page_offset,
-      index_page_offset: None,
-      dictionary_page_offset: dict_page_offset,
-      // TODO: write statistics
-      statistics: None
-    };
+    let metadata = ColumnChunkMetaDataBuilder::new(self.descr.clone())
+      .set_compression(self.codec)
+      .set_encodings(encodings)
+      .set_file_offset(file_offset)
+      .set_total_compressed_size(total_compressed_size)
+      .set_total_uncompressed_size(total_uncompressed_size)
+      .set_num_values(num_values)
+      .set_data_page_offset(data_page_offset)
+      .set_dictionary_page_offset(dict_page_offset)
+      .build();
 
-    self.page_writer.write_metadata(&meta)?;
-    self.column_chunk_metadata = Some(Rc::new(meta));
-    */
+    self.page_writer.write_metadata(&metadata)?;
+    self.column_chunk_metadata = Some(Rc::new(metadata));
 
     Ok(())
   }
