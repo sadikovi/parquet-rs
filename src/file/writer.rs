@@ -37,11 +37,11 @@ use util::io::{Position, TOutputStream};
 pub struct SerializedPageWriter<T: Write + Position> {
   sink: T,
   compressor: Option<Box<Codec>>,
-  dictionary_page_offset: Option<u64>,
-  data_page_offset: Option<u64>,
-  total_uncompressed_size: u64,
-  total_compressed_size: u64,
-  num_values: u32
+  dictionary_page_offset: Option<usize>,
+  data_page_offset: Option<usize>,
+  total_uncompressed_size: usize,
+  total_compressed_size: usize,
+  num_values: usize
 }
 
 impl<T: Write + Position> SerializedPageWriter<T> {
@@ -156,11 +156,11 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
     let header_size = self.serialize_page_header(page_header)?;
     self.sink.write_all(page.data())?;
 
-    self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
-    self.total_compressed_size += (compressed_size + header_size) as u64;
-    self.num_values += num_values;
+    self.total_uncompressed_size += uncompressed_size + header_size;
+    self.total_compressed_size += compressed_size + header_size;
+    self.num_values += num_values as usize;
 
-    let bytes_written = (self.sink.pos() - start_pos) as usize;
+    let bytes_written = self.sink.pos() - start_pos;
     Ok(bytes_written)
   }
 
@@ -169,27 +169,27 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
   }
 
   #[inline]
-  fn dictionary_page_offset(&self) -> Option<u64> {
+  fn dictionary_page_offset(&self) -> Option<usize> {
     self.dictionary_page_offset
   }
 
   #[inline]
-  fn data_page_offset(&self) -> u64 {
+  fn data_page_offset(&self) -> usize {
     self.data_page_offset.unwrap_or(0)
   }
 
   #[inline]
-  fn total_uncompressed_size(&self) -> u64 {
+  fn total_uncompressed_size(&self) -> usize {
     self.total_uncompressed_size
   }
 
   #[inline]
-  fn total_compressed_size(&self) -> u64 {
+  fn total_compressed_size(&self) -> usize {
     self.total_compressed_size
   }
 
   #[inline]
-  fn num_values(&self) -> u32 {
+  fn num_values(&self) -> usize {
     self.num_values
   }
 }

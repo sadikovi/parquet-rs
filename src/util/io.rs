@@ -71,7 +71,7 @@ impl Read for FileChunk {
 /// Should be used together with `Write` trait.
 pub trait Position {
   /// Returns the current position in the stream.
-  fn pos(&self) -> u64;
+  fn pos(&self) -> usize;
 }
 
 /// Output stream as a thin wrapper for `PosWrite`.
