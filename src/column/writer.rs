@@ -374,7 +374,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   fn should_dict_fallback(&self) -> bool {
     match self.dict_encoder {
       Some(ref encoder) => {
-        encoder.dict_encoded_size() >= self.props.dictionary_pagesize_limit() as u64
+        encoder.dict_encoded_size() >= self.props.dictionary_pagesize_limit()
       },
       None => false
     }
@@ -383,7 +383,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   /// Returns true if there is enough data for a data page, false otherwise.
   #[inline]
   fn should_add_data_page(&self) -> bool {
-    self.encoder.estimated_data_encoded_size() >= self.props.data_pagesize_limit() as u64
+    self.encoder.estimated_data_encoded_size() >= self.props.data_pagesize_limit()
   }
 
   /// Performs dictionary fallback.
