@@ -105,10 +105,14 @@ pub struct ColumnWriterImpl<T: DataType> {
   encoder: Box<Encoder<T>>,
   codec: Compression,
   compressor: Option<Box<Codec>>,
+  // Metrics per page
   num_buffered_values: usize,
   num_buffered_encoded_values: usize,
-  rows_written: usize,
-  total_bytes_written: u64,
+  num_buffered_rows: usize,
+  // Metrics per column writer
+  total_bytes_written: usize,
+  total_rows_written: usize,
+  // Reused buffers
   def_levels_sink: Vec<i16>,
   rep_levels_sink: Vec<i16>,
   data_pages: VecDeque<CompressedPage>
@@ -152,8 +156,9 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       compressor: compressor,
       num_buffered_values: 0,
       num_buffered_encoded_values: 0,
-      rows_written: 0,
+      num_buffered_rows: 0,
       total_bytes_written: 0,
+      total_rows_written: 0,
       def_levels_sink: vec![],
       rep_levels_sink: vec![],
       data_pages: VecDeque::new()
@@ -218,8 +223,13 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   }
 
   /// Returns total number of bytes written by this column writer.
-  pub fn get_total_bytes_written(&self) -> u64 {
+  pub fn get_total_bytes_written(&self) -> usize {
     self.total_bytes_written
+  }
+
+  /// Returns total number of rows written by this column writer.
+  pub fn get_total_rows_written(&self) -> usize {
+    self.total_rows_written
   }
 
   /// Returns reference counted column chunk metadata for this column.
@@ -310,7 +320,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       let levels = rep_levels.unwrap();
       for &level in levels {
         if level == 0 {
-          self.rows_written += 1;
+          self.num_buffered_rows += 1;
         }
       }
 
@@ -318,7 +328,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     } else {
       // Each value is exactly one row
       // Equals to the original number of values, so we count nulls as well
-      self.rows_written += values.len();
+      self.num_buffered_rows += values.len();
     }
 
     // Check that we have enough values to write
@@ -481,7 +491,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
         num_values: self.num_buffered_values as u32,
         encoding: encoding,
         num_nulls: (self.num_buffered_values - self.num_buffered_encoded_values) as u32,
-        num_rows: self.rows_written as u32,
+        num_rows: self.num_buffered_rows as u32,
         def_levels_byte_len: def_levels_byte_len as u32,
         rep_levels_byte_len: rep_levels_byte_len as u32,
         is_compressed: self.compressor.is_some(),
@@ -497,12 +507,15 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       self.write_data_page(compressed_page)?;
     }
 
+    // Update total number of rows
+    self.total_rows_written += self.num_buffered_rows;
+
     // Reset state
     self.rep_levels_sink.clear();
     self.def_levels_sink.clear();
     self.num_buffered_values = 0;
     self.num_buffered_encoded_values = 0;
-    self.rows_written = 0;
+    self.num_buffered_rows = 0;
 
     Ok(())
   }
@@ -584,7 +597,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   /// Writes compressed data page into underlying sink.
   #[inline]
   fn write_data_page(&mut self, page: CompressedPage) -> Result<()> {
-    self.total_bytes_written += self.page_writer.write_page(page)? as u64;
+    self.total_bytes_written += self.page_writer.write_page(page)?;
     Ok(())
   }
 
@@ -614,7 +627,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
           // TODO: is our dictionary data sorted?
           is_sorted: false
         };
-        self.total_bytes_written += self.page_writer.write_page(page)? as u64;
+        self.total_bytes_written += self.page_writer.write_page(page)?;
         Ok(())
       },
       None => Err(general_err!("Dictionary encoder is not set"))
