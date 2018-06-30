@@ -20,10 +20,9 @@
 use std::io::Write;
 use std::rc::Rc;
 
-use basic::{Compression, PageType};
+use basic::PageType;
 use column::page::{CompressedPage, PageWriter};
 use column::writer::{ColumnWriter, get_column_writer};
-use compression::{Codec, create_codec};
 use errors::{ParquetError, Result};
 use file::metadata::*;
 use file::properties::WriterPropertiesPtr;
@@ -31,6 +30,15 @@ use parquet_format as parquet;
 use schema::types::SchemaDescPtr;
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
 use util::io::{Position, TOutputStream};
+
+/// Serialized file writer.
+///
+/// The main entrypoint of writing a Parquet file.
+pub struct SerializedFileWriter {
+}
+
+impl SerializedFileWriter {
+}
 
 /// Serialized row group writer.
 ///
@@ -221,7 +229,6 @@ impl SerializedRowGroupWriter {
 /// and provides proxy for comporession.
 pub struct SerializedPageWriter<T: Write + Position> {
   sink: T,
-  compressor: Option<Box<Codec>>,
   dictionary_page_offset: Option<usize>,
   data_page_offset: Option<usize>,
   total_uncompressed_size: usize,
@@ -231,10 +238,9 @@ pub struct SerializedPageWriter<T: Write + Position> {
 
 impl<T: Write + Position> SerializedPageWriter<T> {
   /// Creates new page writer.
-  pub fn new(codec: Compression, sink: T) -> Self {
+  pub fn new(sink: T) -> Self {
     Self {
       sink: sink,
-      compressor: create_codec(codec).expect("Codec is supported"),
       dictionary_page_offset: None,
       data_page_offset: None,
       total_uncompressed_size: 0,
