@@ -96,6 +96,7 @@ pub struct ColumnWriterImpl<T: DataType> {
   props: WriterPropertiesPtr,
   page_writer: Box<PageWriter>,
   dict_encoder: Option<DictEncoder<T>>,
+  fallback: bool,
   encoder: Box<Encoder<T>>,
   num_buffered_values: usize,
   num_buffered_encoded_values: usize,
@@ -131,6 +132,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       props: props,
       page_writer: page_writer,
       dict_encoder: dict_encoder,
+      fallback: false,
       encoder: fallback_encoder,
       num_buffered_values: 0,
       num_buffered_encoded_values: 0,
@@ -199,10 +201,14 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   /// Returns total number of bytes written by this column writer.
   pub fn close(mut self) -> Result<u64> {
     if self.dict_encoder.is_some() {
+      // All pages have been written using dictionary encoding, no fallback.
       self.write_dictionary_page()?;
       self.dict_encoder = None;
     }
     self.flush_data_pages()?;
+
+    // TODO: update metadata.
+
     Ok(self.total_bytes_written)
   }
 
@@ -352,6 +358,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     self.write_dictionary_page()?;
     self.flush_data_pages()?;
     self.dict_encoder = None;
+    self.fallback = true;
     Ok(())
   }
 
