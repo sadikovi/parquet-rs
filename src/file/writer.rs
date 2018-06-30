@@ -67,26 +67,16 @@ impl SerializedRowGroupWriter {
     self.descr.num_columns()
   }
 
-  /// Returns true if there are more column writer available, false otherwise.
-  #[inline]
-  pub fn has_next_column(&self) -> bool {
-    self.column_index < self.num_columns() && self.row_group_metadata.is_none()
-  }
-
   /// Returns current column index.
   #[inline]
   pub fn column_index(&self) -> usize {
     self.column_index
   }
 
+  /// Returns true if there are more column writer available, false otherwise.
   #[inline]
-  pub fn get_row_group_metadata(&self) -> RowGroupMetaDataPtr {
-    assert!(
-      self.row_group_metadata.is_some(),
-      "Row group metadata is not available, row group writer is not closed"
-    );
-
-    self.row_group_metadata.clone().unwrap()
+  pub fn has_next_column(&self) -> bool {
+    self.column_index < self.num_columns() && self.row_group_metadata.is_none()
   }
 
   /// Returns the next column writer.
@@ -136,6 +126,16 @@ impl SerializedRowGroupWriter {
     }
 
     Ok(())
+  }
+
+  #[inline]
+  pub fn get_row_group_metadata(&self) -> RowGroupMetaDataPtr {
+    assert!(
+      self.row_group_metadata.is_some(),
+      "Row group metadata is not available, row group writer is not closed"
+    );
+
+    self.row_group_metadata.clone().unwrap()
   }
 
   /// Checks and finalises current column writer.
