@@ -18,13 +18,14 @@
 //! Contains file writer API.
 
 use std::io::Write;
+use std::rc::Rc;
 
 use basic::{Compression, PageType};
 use column::page::{CompressedPage, PageWriter};
 use column::writer::{ColumnWriter, get_column_writer};
 use compression::{Codec, create_codec};
 use errors::{ParquetError, Result};
-use file::metadata::ColumnChunkMetaData;
+use file::metadata::*;
 use file::properties::WriterPropertiesPtr;
 use parquet_format as parquet;
 use schema::types::SchemaDescPtr;
@@ -40,25 +41,52 @@ pub struct SerializedRowGroupWriter {
   total_rows_written: Option<usize>,
   total_bytes_written: usize,
   column_index: usize,
-  current_column_writer: Option<ColumnWriter>
+  current_column_writer: Option<ColumnWriter>,
+  row_group_metadata: Option<RowGroupMetaDataPtr>,
+  column_chunks: Vec<ColumnChunkMetaDataPtr>
 }
 
 impl SerializedRowGroupWriter {
   pub fn new(schema_descr: SchemaDescPtr, properties: WriterPropertiesPtr) -> Self {
+    let num_columns = schema_descr.num_columns();
     Self {
       descr: schema_descr,
       props: properties,
       total_rows_written: None,
       total_bytes_written: 0,
       column_index: 0,
-      current_column_writer: None
+      current_column_writer: None,
+      row_group_metadata: None,
+      column_chunks: Vec::with_capacity(num_columns)
     }
+  }
+
+  /// Returns number of columns in the schema.
+  #[inline]
+  pub fn num_columns(&self) -> usize {
+    self.descr.num_columns()
   }
 
   /// Returns true if there are more column writer available, false otherwise.
   #[inline]
-  pub fn has_next_column(&mut self) -> bool {
-    self.column_index < self.num_columns()
+  pub fn has_next_column(&self) -> bool {
+    self.column_index < self.num_columns() && self.row_group_metadata.is_none()
+  }
+
+  /// Returns current column index.
+  #[inline]
+  pub fn column_index(&self) -> usize {
+    self.column_index
+  }
+
+  #[inline]
+  pub fn get_row_group_metadata(&self) -> RowGroupMetaDataPtr {
+    assert!(
+      self.row_group_metadata.is_some(),
+      "Row group metadata is not available, row group writer is not closed"
+    );
+
+    self.row_group_metadata.clone().unwrap()
   }
 
   /// Returns the next column writer.
@@ -68,8 +96,11 @@ impl SerializedRowGroupWriter {
   /// finished before calling this method.
   #[inline]
   pub fn next_column(&mut self) -> Result<&mut ColumnWriter> {
-    self.finalise_column_writer()?;
+    if self.row_group_metadata.is_some() {
+      return Err(general_err!("Row group writer is closed"));
+    }
 
+    self.finalise_column_writer()?;
     if self.column_index < self.num_columns() {
       let page_writer = unimplemented!();
       let column_writer = get_column_writer(
@@ -87,17 +118,23 @@ impl SerializedRowGroupWriter {
     }
   }
 
-  /// Returns number of columns in the schema.
-  #[inline]
-  pub fn num_columns(&self) -> usize {
-    self.descr.num_columns()
-  }
-
+  /// Closes this row group writer and updates row group metadata.
   #[inline]
   pub fn close(&mut self) -> Result<()> {
-    self.finalise_column_writer()?;
-    self.current_column_writer = None;
-    // TODO: update metadata
+    if self.row_group_metadata.is_none() {
+      self.finalise_column_writer()?;
+      self.current_column_writer = None;
+
+      let row_group_metadata =
+        RowGroupMetaDataBuilder::new(self.descr.clone())
+          .set_column_metadata(self.column_chunks.clone())
+          .set_total_byte_size(self.total_bytes_written as i64)
+          .set_num_rows(self.total_rows_written.unwrap_or(0) as i64)
+          .build();
+
+      self.row_group_metadata = Some(Rc::new(row_group_metadata));
+    }
+
     Ok(())
   }
 
@@ -106,52 +143,62 @@ impl SerializedRowGroupWriter {
     if let Some(ref mut writer) = self.current_column_writer {
       let rows_written;
       let bytes_written;
+      let metadata;
 
       match writer {
         ColumnWriter::BoolColumnWriter(typed) => {
           typed.close()?;
           rows_written = typed.get_total_rows_written();
           bytes_written = typed.get_total_bytes_written();
+          metadata = typed.get_column_metadata();
         },
         ColumnWriter::Int32ColumnWriter(typed) => {
           typed.close()?;
           rows_written = typed.get_total_rows_written();
           bytes_written = typed.get_total_bytes_written();
+          metadata = typed.get_column_metadata();
         },
         ColumnWriter::Int64ColumnWriter(typed) => {
           typed.close()?;
           rows_written = typed.get_total_rows_written();
           bytes_written = typed.get_total_bytes_written();
+          metadata = typed.get_column_metadata();
         },
         ColumnWriter::Int96ColumnWriter(typed) => {
           typed.close()?;
           rows_written = typed.get_total_rows_written();
           bytes_written = typed.get_total_bytes_written();
+          metadata = typed.get_column_metadata();
         },
         ColumnWriter::FloatColumnWriter(typed) => {
           typed.close()?;
           rows_written = typed.get_total_rows_written();
           bytes_written = typed.get_total_bytes_written();
+          metadata = typed.get_column_metadata();
         },
         ColumnWriter::DoubleColumnWriter(typed) => {
           typed.close()?;
           rows_written = typed.get_total_rows_written();
           bytes_written = typed.get_total_bytes_written();
+          metadata = typed.get_column_metadata();
         },
         ColumnWriter::ByteArrayColumnWriter(typed) => {
           typed.close()?;
           rows_written = typed.get_total_rows_written();
           bytes_written = typed.get_total_bytes_written();
+          metadata = typed.get_column_metadata();
         },
         ColumnWriter::FixedLenByteArrayColumnWriter(typed) => {
           typed.close()?;
           rows_written = typed.get_total_rows_written();
           bytes_written = typed.get_total_bytes_written();
+          metadata = typed.get_column_metadata();
         }
       }
 
       // Update row group writer metrics
       self.total_bytes_written += bytes_written;
+      self.column_chunks.push(metadata);
       if let Some(rows) = self.total_rows_written {
         if rows != rows_written {
           return Err(general_err!(

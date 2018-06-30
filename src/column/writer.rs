@@ -184,7 +184,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     // TODO: find out why we don't account for size of levels when we estimate page size.
 
     if self.column_chunk_metadata.is_some() {
-      return Err(general_err!("Column writer has been closed"));
+      return Err(general_err!("Column writer is closed"));
     }
 
     // Find out the minimal length to prevent index out of bound errors

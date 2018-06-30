@@ -237,6 +237,59 @@ impl RowGroupMetaData {
   }
 }
 
+// Builder for row group metadata.
+pub struct RowGroupMetaDataBuilder {
+  columns: Vec<ColumnChunkMetaDataPtr>,
+  schema_descr: SchemaDescPtr,
+  num_rows: i64,
+  total_byte_size: i64
+}
+
+impl RowGroupMetaDataBuilder {
+  /// Creates new builder from schema descriptor.
+  pub fn new(schema_descr: SchemaDescPtr) -> Self {
+    Self {
+      columns: Vec::with_capacity(schema_descr.num_columns()),
+      schema_descr: schema_descr,
+      num_rows: 0,
+      total_byte_size: 0
+    }
+  }
+
+  /// Sets number of rows in this row group.
+  pub fn set_num_rows(mut self, value: i64) -> Self {
+    self.num_rows = value;
+    self
+  }
+
+  /// Sets total size in bytes for this row group.
+  pub fn set_total_byte_size(mut self, value: i64) -> Self {
+    self.total_byte_size = value;
+    self
+  }
+
+  /// Sets column metadata for this row group.
+  pub fn set_column_metadata(mut self, value: Vec<ColumnChunkMetaDataPtr>) -> Self {
+    self.columns = value;
+    self
+  }
+
+  /// Builds row group metadata.
+  pub fn build(self) -> RowGroupMetaData {
+    assert_eq!(
+      self.schema_descr.num_columns(), self.columns.len(),
+      "Column length mismatch"
+    );
+
+    RowGroupMetaData {
+      columns: self.columns,
+      num_rows: self.num_rows,
+      total_byte_size: self.total_byte_size,
+      schema_descr: self.schema_descr
+    }
+  }
+}
+
 /// Reference counted pointer for [`ColumnChunkMetaData`].
 pub type ColumnChunkMetaDataPtr = Rc<ColumnChunkMetaData>;
 
