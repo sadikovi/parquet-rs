@@ -24,11 +24,9 @@ use column::page::{CompressedPage, PageWriter};
 use compression::{Codec, create_codec};
 use errors::Result;
 use file::metadata::ColumnChunkMetaData;
-use parquet_format::{DataPageHeader, DataPageHeaderV2, DictionaryPageHeader, PageHeader};
+use parquet_format as parquet;
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
 use util::io::{Position, TOutputStream};
-
-// TODO: Clean up metrics that we collect in page writer, see if we actually use any.
 
 /// Serialized page writer.
 ///
@@ -59,15 +57,24 @@ impl<T: Write + Position> SerializedPageWriter<T> {
   }
 
   /// Serializes page header into Thrift.
-  fn serialize_page_header(&mut self, page_header: PageHeader) -> Result<usize> {
+  fn serialize_page_header(&mut self, header: parquet::PageHeader) -> Result<usize> {
     let start_pos = self.sink.pos();
     {
       let transport = TOutputStream::new(&mut self.sink);
       let mut protocol = TCompactOutputProtocol::new(transport);
-      page_header.write_to_out_protocol(&mut protocol)?;
+      header.write_to_out_protocol(&mut protocol)?;
       protocol.flush()?;
     }
     Ok((self.sink.pos() - start_pos) as usize)
+  }
+
+  /// Serializes column chunk into Thrift.
+  fn serialize_column_chunk(&mut self, chunk: parquet::ColumnChunk) -> Result<()> {
+    let transport = TOutputStream::new(&mut self.sink);
+    let mut protocol = TCompactOutputProtocol::new(transport);
+    chunk.write_to_out_protocol(&mut protocol)?;
+    protocol.flush()?;
+    Ok(())
   }
 }
 
@@ -79,7 +86,7 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
     let encoding = page.encoding();
     let page_type = page.page_type();
 
-    let mut page_header = PageHeader {
+    let mut page_header = parquet::PageHeader {
       type_: page_type.into(),
       uncompressed_page_size: uncompressed_size as i32,
       compressed_page_size: compressed_size as i32,
@@ -93,7 +100,7 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
 
     match page {
       CompressedPage::DataPage { def_level_encoding, rep_level_encoding, .. } => {
-        let data_page_header = DataPageHeader {
+        let data_page_header = parquet::DataPageHeader {
           num_values: num_values as i32,
           encoding: encoding.into(),
           definition_level_encoding: def_level_encoding.into(),
@@ -112,7 +119,7 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
         is_compressed,
         ..
       } => {
-        let data_page_header_v2 = DataPageHeaderV2 {
+        let data_page_header_v2 = parquet::DataPageHeaderV2 {
           num_values: num_values as i32,
           num_nulls: num_nulls as i32,
           num_rows: num_rows as i32,
@@ -127,7 +134,7 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
         page_header.data_page_header_v2 = Some(data_page_header_v2);
       },
       CompressedPage::DictionaryPage { is_sorted, .. } => {
-        let dictionary_page_header = DictionaryPageHeader {
+        let dictionary_page_header = parquet::DictionaryPageHeader {
           num_values: num_values as i32,
           encoding: encoding.into(),
           is_sorted: Some(is_sorted)
@@ -165,7 +172,33 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
   }
 
   fn write_metadata(&mut self, metadata: &ColumnChunkMetaData) -> Result<()> {
-    unimplemented!();
+    let column_metadata = parquet::ColumnMetaData {
+      type_: metadata.column_type().into(),
+      encodings: metadata.encodings().iter().map(|&v| v.into()).collect(),
+      path_in_schema: Vec::from(metadata.column_path().as_slice()),
+      codec: metadata.compression().into(),
+      num_values: metadata.num_values(),
+      total_uncompressed_size: metadata.uncompressed_size(),
+      total_compressed_size: metadata.compressed_size(),
+      key_value_metadata: None,
+      data_page_offset: metadata.data_page_offset(),
+      index_page_offset: None,
+      dictionary_page_offset: metadata.dictionary_page_offset(),
+      statistics: None,
+      encoding_stats: None
+    };
+
+    let column_chunk = parquet::ColumnChunk {
+      file_path: metadata.file_path().map(|v| v.clone()),
+      file_offset: metadata.file_offset(),
+      meta_data: Some(column_metadata),
+      offset_index_offset: None,
+      offset_index_length: None,
+      column_index_offset: None,
+      column_index_length: None
+    };
+
+    self.serialize_column_chunk(column_chunk)
   }
 
   #[inline]
