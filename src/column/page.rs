@@ -19,8 +19,9 @@
 
 use basic::{PageType, Encoding};
 use errors::Result;
-use util::memory::ByteBufferPtr;
+use file::metadata::ColumnChunkMetaData;
 use file::statistics::Statistics;
+use util::memory::ByteBufferPtr;
 
 /// Parquet Page definition.
 ///
@@ -206,6 +207,29 @@ pub trait PageWriter {
   /// Writes dictionary page into the output stream/sink.
   /// Returns number of bytes written into the sink.
   fn write_dictionary_page(&mut self, page: Page) -> Result<usize>;
+
+  /// Writes column chunk metadata into the output stream/sink.
+  fn write_metadata(&mut self, metadata: &ColumnChunkMetaData) -> Result<()>;
+
+  /// Returns dictionary page offset in bytes, if set.
+  #[inline]
+  fn dictionary_page_offset(&self) -> Option<u64>;
+
+  /// Returns data page (either v1 or v2) offset in bytes, if set.
+  #[inline]
+  fn data_page_offset(&self) -> Option<u64>;
+
+  /// Returns total uncompressed size so far.
+  #[inline]
+  fn total_uncompressed_size(&self) -> u64;
+
+  /// Returns total compressed size so far.
+  #[inline]
+  fn total_compressed_size(&self) -> u64;
+
+  /// Returns number of values so far.
+  #[inline]
+  fn num_values(&self) -> u64;
 }
 
 #[cfg(test)]

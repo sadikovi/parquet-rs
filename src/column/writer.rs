@@ -22,12 +22,13 @@ use std::collections::VecDeque;
 use std::mem;
 use std::rc::Rc;
 
-use basic::{Encoding, Type};
+use basic::{Compression, Encoding, Type};
 use column::page::{CompressedPage, Page, PageWriter};
 use data_type::*;
 use encodings::encoding::{DictEncoder, Encoder, get_encoder};
 use encodings::levels::LevelEncoder;
 use errors::{ParquetError, Result};
+use file::metadata::{ColumnChunkMetaData, ColumnChunkMetaDataPtr};
 use file::properties::{WriterPropertiesPtr, WriterVersion};
 use schema::types::ColumnDescPtr;
 use util::memory::{ByteBufferPtr, MemTracker};
@@ -92,11 +93,14 @@ pub fn get_typed_column_writer<T: DataType>(
 
 /// Typed column writer for a primitive column.
 pub struct ColumnWriterImpl<T: DataType> {
+  // Column chunk metadata serves as indicator of whether or not column writer has been
+  // closed. If it is set, then we have finalised the writes.
+  column_chunk_metadata: Option<ColumnChunkMetaDataPtr>,
   descr: ColumnDescPtr,
   props: WriterPropertiesPtr,
   page_writer: Box<PageWriter>,
+  has_dictionary: bool,
   dict_encoder: Option<DictEncoder<T>>,
-  fallback: bool,
   encoder: Box<Encoder<T>>,
   num_buffered_values: usize,
   num_buffered_encoded_values: usize,
@@ -120,6 +124,9 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       None
     };
 
+    // Whether or not this column writer has a dictionary encoding.
+    let has_dictionary = dict_encoder.is_some();
+
     // Set either main encoder or fallback encoder.
     let fallback_encoder = get_encoder(
       descr.clone(),
@@ -128,11 +135,12 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     ).unwrap();
 
     Self {
+      column_chunk_metadata: None,
       descr: descr,
       props: props,
       page_writer: page_writer,
+      has_dictionary: has_dictionary,
       dict_encoder: dict_encoder,
-      fallback: false,
       encoder: fallback_encoder,
       num_buffered_values: 0,
       num_buffered_encoded_values: 0,
@@ -161,6 +169,10 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     // limit.
 
     // TODO: find out why we don't account for size of levels when we estimate page size.
+
+    if self.column_chunk_metadata.is_some() {
+      return Err(general_err!("Column writer has been closed"));
+    }
 
     // Find out the minimal length to prevent index out of bound errors
     let mut min_len = values.len();
@@ -197,21 +209,36 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     Ok(values_offset)
   }
 
-  /// Finalises writes and closes the column writer.
   /// Returns total number of bytes written by this column writer.
-  pub fn close(mut self) -> Result<u64> {
-    if self.dict_encoder.is_some() {
-      // All pages have been written using dictionary encoding, no fallback.
-      self.write_dictionary_page()?;
-      self.dict_encoder = None;
-    }
-    self.flush_data_pages()?;
-
-    // TODO: update metadata.
-
-    Ok(self.total_bytes_written)
+  pub fn get_total_bytes_written(&self) -> u64 {
+    self.total_bytes_written
   }
 
+  /// Returns reference counted column chunk metadata for this column.
+  /// Metadata is only available after column writer has been closed.
+  pub fn get_column_metadata(&self) -> ColumnChunkMetaDataPtr {
+    assert!(
+      self.column_chunk_metadata.is_some(),
+      "Column chunk metadata is not available, column writer is not closed"
+    );
+
+    self.column_chunk_metadata.clone().unwrap()
+  }
+
+  /// Finalises writes and closes the column writer.
+  /// Returns total number of bytes written by this column writer.
+  pub fn close(&mut self) -> Result<()> {
+    if self.column_chunk_metadata.is_none() {
+      if self.dict_encoder.is_some() {
+        self.write_dictionary_page()?;
+      }
+      self.flush_data_pages()?;
+      self.write_column_metadata()?;
+      self.dict_encoder = None;
+    }
+
+    Ok(())
+  }
 
   /// Writes mini batch of values, definition and repetition levels.
   /// This allows fine-grained processing of values and maintaining a reasonable
@@ -358,7 +385,6 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     self.write_dictionary_page()?;
     self.flush_data_pages()?;
     self.dict_encoder = None;
-    self.fallback = true;
     Ok(())
   }
 
@@ -428,6 +454,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
         encoding: encoding,
         def_level_encoding: Encoding::RLE,
         rep_level_encoding: Encoding::RLE,
+        // TODO: process statistics
         statistics: None
       }
     } else {
@@ -452,6 +479,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
         def_levels_byte_len: def_levels_byte_len as u32,
         rep_levels_byte_len: rep_levels_byte_len as u32,
         is_compressed: is_compressed,
+        // TODO: process statistics
         statistics: None
       }
     };
@@ -475,6 +503,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
 
   /// Finalises any outstanding data pages and flushes buffered data pages from
   /// dictionary encoding into underlying sink.
+  #[inline]
   fn flush_data_pages(&mut self) -> Result<()> {
     // Write all outstanding data to a new page
     if self.num_buffered_values > 0 {
@@ -484,6 +513,60 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     while let Some(page) = self.data_pages.pop_front() {
       self.write_data_page(page)?;
     }
+
+    Ok(())
+  }
+
+  /// Assembles and writes column chunk metadata.
+  fn write_column_metadata(&mut self) -> Result<()> {
+    let total_compressed_size = self.page_writer.total_compressed_size() as i64;
+    let total_uncompressed_size = self.page_writer.total_uncompressed_size() as i64;
+    let num_values = self.page_writer.num_values() as i64;
+    let dict_page_offset = self.page_writer.dictionary_page_offset().map(|v| v as i64);
+    // If data page offset is not set, then no pages have been written
+    let data_page_offset = self.page_writer.data_page_offset().unwrap_or(0) as i64;
+
+    let mut file_offset = 0i64;
+    let mut encodings = Vec::new();
+
+    if self.has_dictionary {
+      assert!(dict_page_offset.is_some(), "Dictionary offset is not set");
+      file_offset = dict_page_offset.unwrap() + total_compressed_size;
+      // NOTE: This should be in sync with writing dictionary pages
+      encodings.push(self.props.dictionary_page_encoding());
+      encodings.push(self.props.data_page_dictionary_encoding());
+      // Fallback to alternative encoding, add it to the list
+      if self.dict_encoder.is_none() {
+        encodings.push(self.encoder.encoding());
+      }
+    } else {
+      file_offset = data_page_offset + total_compressed_size;
+      encodings.push(self.encoder.encoding());
+    }
+
+    /*
+    let meta = ColumnChunkMetaData {
+      column_type: self.descr.physical_type().into(),
+      column_path: self.descr.path().clone(),
+      column_descr: self.descr.clone(),
+      encodings: encodings,
+      file_path: None,
+      file_offset: file_offset,
+      num_values: num_values,
+      // TODO: update compression
+      compression: Compression::UNCOMPRESSED,
+      total_compressed_size: total_compressed_size,
+      total_uncompressed_size: total_uncompressed_size,
+      data_page_offset: data_page_offset,
+      index_page_offset: None,
+      dictionary_page_offset: dict_page_offset,
+      // TODO: write statistics
+      statistics: None
+    };
+
+    self.page_writer.write_metadata(&meta)?;
+    self.column_chunk_metadata = Some(Rc::new(meta));
+    */
 
     Ok(())
   }

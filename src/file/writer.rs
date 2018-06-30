@@ -23,6 +23,7 @@ use basic::{Compression, PageType};
 use column::page::{CompressedPage, Page, PageWriter};
 use compression::{Codec, create_codec};
 use errors::Result;
+use file::metadata::ColumnChunkMetaData;
 use parquet_format::{DataPageHeader, DataPageHeaderV2, DictionaryPageHeader, PageHeader};
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
 use util::io::{Position, TOutputStream};
@@ -56,36 +57,6 @@ impl<T: Write + Position> SerializedPageWriter<T> {
       total_compressed_size: 0,
       num_values: 0
     }
-  }
-
-  /// Returns dictionary page offset, if set.
-  #[inline]
-  pub fn dictionary_page_offset(&self) -> Option<u64> {
-    self.dictionary_page_offset
-  }
-
-  /// Returns data page (either v1 or v2) offset, if set.
-  #[inline]
-  pub fn data_page_offset(&self) -> Option<u64> {
-    self.data_page_offset
-  }
-
-  /// Returns total uncompressed size so far.
-  #[inline]
-  pub fn total_uncompressed_size(&self) -> u64 {
-    self.total_uncompressed_size
-  }
-
-  /// Returns total compressed size so far.
-  #[inline]
-  pub fn total_compressed_size(&self) -> u64 {
-    self.total_compressed_size
-  }
-
-  /// Returns number of values so far.
-  #[inline]
-  pub fn num_values(&self) -> u64 {
-    self.num_values
   }
 
   /// Serializes page header into Thrift.
@@ -232,5 +203,34 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
       }
       _ => panic!("Write dictionary page only")
     }
+  }
+
+  fn write_metadata(&mut self, metadata: &ColumnChunkMetaData) -> Result<()> {
+    unimplemented!();
+  }
+
+  #[inline]
+  fn dictionary_page_offset(&self) -> Option<u64> {
+    self.dictionary_page_offset
+  }
+
+  #[inline]
+  fn data_page_offset(&self) -> Option<u64> {
+    self.data_page_offset
+  }
+
+  #[inline]
+  fn total_uncompressed_size(&self) -> u64 {
+    self.total_uncompressed_size
+  }
+
+  #[inline]
+  fn total_compressed_size(&self) -> u64 {
+    self.total_compressed_size
+  }
+
+  #[inline]
+  fn num_values(&self) -> u64 {
+    self.num_values
   }
 }

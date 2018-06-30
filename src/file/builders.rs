@@ -17,22 +17,29 @@
 
 //! Contains metadata builders.
 
-use std::rc::Rc;
-
-use basic::Encoding;
-use file::properties::{WriterProperties, WriterVersion};
+use basic::{Compression as CodecType};
 use parquet_format::{ColumnChunk, ColumnMetaData};
 use schema::types::ColumnDescPtr;
 
+/*
 // Builder for column chunk metadata.
 pub struct ColumnChunkMetaDataBuilder {
-  properties: Rc<WriterProperties>,
+  // Column descriptor
   column_descr: ColumnDescPtr,
+  // Total bytes written by column writer
+  total_bytes_written: u64,
+  // Dictionary encoding
+  dictionary_encoding: Option<Encoding>,
+  // Data page encoding for dictionary
+  dictionary_datapage_encoding: Option<Encoding>,
+  // Fallback encoding
+  encoding: Option<Encoding>,
+  // Thrift column chunk (can be updated)
   column_chunk: ColumnChunk
 }
 
 impl ColumnChunkMetaDataBuilder {
-  pub fn new(properties: Rc<WriterProperties>, column_descr: ColumnDescPtr) -> Self {
+  pub fn new(column_descr: ColumnDescPtr) -> Self {
     let column_metadata = ColumnMetaData {
       // Type of this column *
       type_: column_descr.physical_type().into(),
@@ -41,7 +48,7 @@ impl ColumnChunkMetaDataBuilder {
       // Path in schema.
       path_in_schema: Vec::from(column_descr.path().as_slice()),
       // Compression codec.
-      codec: properties.compression(column_descr.path()).into(),
+      codec: CodecType::UNCOMPRESSED.into(),
       // Number of values in this column.
       num_values: 0,
       // Total byte size of all uncompressed pages in this column chunk.
@@ -63,8 +70,11 @@ impl ColumnChunkMetaDataBuilder {
     };
 
     Self {
-      properties: properties,
       column_descr: column_descr,
+      dictionary_encoding: None,
+      dictionary_datapage_encoding: None,
+      encoding: None,
+      total_bytes_written: 0,
       column_chunk: ColumnChunk {
         // Path is relative to the current file.
         file_path: None,
@@ -79,28 +89,117 @@ impl ColumnChunkMetaDataBuilder {
     }
   }
 
+  /// Sets compression for this column chunk.
+  #[inline]
+  pub fn set_compression(&mut self, codec: CodecType) {
+    let metadata = self.column_chunk.meta_data.as_mut().unwrap();
+    metadata.codec = codec.into();
+  }
+
+  /// Sets file path for column chunk.
+  #[inline]
   pub fn set_file_path(&mut self, path: String) {
     self.column_chunk.file_path = Some(path);
   }
 
+  /// Sets total number of bytes written for this column chunk.
+  /// This is not part of the actual column chunk metadata, but it is used for row groups.
+  #[inline]
+  pub fn set_total_bytes_written(&mut self, total_bytes_written: u64) {
+    self.total_bytes_written = total_bytes_written;
+  }
+
+  /// Sets number of values in this column chunk.
+  #[inline]
+  pub fn set_num_values(&mut self, num_values: u64) {
+    let metadata = self.column_chunk.meta_data.as_mut().unwrap();
+    metadata.num_values = num_values as i64;
+  }
+
+  /// Sets total compressed size in bytes for this column chunk.
+  #[inline]
+  pub fn set_total_compressed_size(&mut self, total_compressed_size: u64) {
+    let metadata = self.column_chunk.meta_data.as_mut().unwrap();
+    metadata.total_compressed_size = total_compressed_size as i64;
+  }
+
+  /// Sets total uncompressed size in bytes for this column chunk.
+  #[inline]
+  pub fn set_total_uncompressed_size(&mut self, total_uncompressed_size: u64) {
+    let metadata = self.column_chunk.meta_data.as_mut().unwrap();
+    metadata.total_uncompressed_size = total_uncompressed_size as i64;
+  }
+
+  /// Sets dictionary page offset in bytes, if dictionary page exists.
+  #[inline]
+  pub fn set_dictionary_page_offset(&mut self, dictionary_page_offset: Option<u64>) {
+    let metadata = self.column_chunk.meta_data.as_mut().unwrap();
+    metadata.dictionary_page_offset = dictionary_page_offset.map(|v| v as i64);
+  }
+
+  /// Sets data page offset in bytes, defaults to position 0.
+  #[inline]
+  pub fn set_data_page_offset(&mut self, data_page_offset: Option<u64>) {
+    let metadata = self.column_chunk.meta_data.as_mut().unwrap();
+    metadata.data_page_offset = data_page_offset.unwrap_or(0) as i64;
+  }
+
+  /// Sets all dictionary related encodings, if enabled.
+  #[inline]
+  pub fn set_dictionary_encoding(&mut self, dict_enc: Encoding, datapage_enc: Encoding) {
+    self.dictionary_encoding = Some(dict_enc);
+    // Encoding of data pages when dictionary is enabled.
+    self.dictionary_datapage_encoding = Some(datapage_enc);
+  }
+
+  /// Sets fallback encoding.
+  #[inline]
+  pub fn set_encoding(&mut self, encoding: Encoding) {
+    self.encoding = Some(encoding);
+  }
+
+  /// Finalises column chunk metadata and sets Thrift definition.
+  ///
+  /// Should be called after all options above are set.
+  /// After calling this method, column chunk metadata builder should be considered
+  /// read-only.
+  pub fn finish(&mut self) {
+    let metadata = self.column_chunk.meta_data.as_mut().unwrap();
+    metadata.thrift_encodings = Vec::new();
+
+    if let Some(dict_offset) = metadata.dictionary_page_offset {
+      assert!(self.dictionary_encoding.is_some(), "Dictionary is not set");
+      assert!(self.dictionary_datapage_encoding.is_some(), "Dictionary is not set");
+
+      self.column_chunk.file_offset = dict_offset + metadata.total_compressed_size;
+      metadata.thrift_encodings.push(self.dictionary_encoding.unwrap().into());
+      metadata.thrift_encodings.push(self.dictionary_datapage_encoding.unwrap().into());
+      if fallback {
+        metadta.thrift_encodings.push(self.encoding.into());
+      }
+    } else {
+      self.column_chunk.file_offset = metadata.data_page_offset + metadata.total_compressed_size;
+      metadta.thrift_encodings.push(self.encoding.into());
+    }
+  }
+
+  /*
   pub fn finish(
     &mut self,
     num_values: i64,
-    compressed_size: i64,
-    uncompressed_size: i64,
+    total_compressed_size: i64,
+    total_uncompressed_size: i64,
     data_page_offset: i64,
-    dictionary_fallback: bool,
-    dictionary_page_offset: Option<i64>,
-    index_page_offset: Option<i64>
+    dictionary_page_offset: Option<i64>
   )
   {
     let meta_data = self.column_chunk.meta_data.as_mut().unwrap();
     meta_data.num_values = num_values;
-    meta_data.total_compressed_size = compressed_size;
+    meta_data.total_compressed_size = total_compressed_size;
     meta_data.total_uncompressed_size = uncompressed_size;
     meta_data.data_page_offset = data_page_offset;
     meta_data.dictionary_page_offset = dictionary_page_offset;
-    meta_data.index_page_offset = index_page_offset;
+    meta_data.index_page_offset = None;
 
     let mut thrift_encodings = Vec::new();
 
@@ -123,9 +222,11 @@ impl ColumnChunkMetaDataBuilder {
     }
     meta_data.encodings = thrift_encodings;
   }
+  */
 }
 
 // ColumnChunkMetaDataBuilder
 // RowGroupMetaDataBuilder
 // FileMetaDataBuilder
 // ParquetMetaDataBuilder
+*/
