@@ -21,12 +21,152 @@ use std::io::Write;
 
 use basic::{Compression, PageType};
 use column::page::{CompressedPage, PageWriter};
+use column::writer::{ColumnWriter, get_column_writer};
 use compression::{Codec, create_codec};
-use errors::Result;
+use errors::{ParquetError, Result};
 use file::metadata::ColumnChunkMetaData;
+use file::properties::WriterPropertiesPtr;
 use parquet_format as parquet;
+use schema::types::SchemaDescPtr;
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
 use util::io::{Position, TOutputStream};
+
+/// Serialized row group writer.
+///
+/// Coordinates writing of a row group with column writers.
+pub struct SerializedRowGroupWriter {
+  descr: SchemaDescPtr,
+  props: WriterPropertiesPtr,
+  total_rows_written: Option<usize>,
+  total_bytes_written: usize,
+  column_index: usize,
+  current_column_writer: Option<ColumnWriter>
+}
+
+impl SerializedRowGroupWriter {
+  pub fn new(schema_descr: SchemaDescPtr, properties: WriterPropertiesPtr) -> Self {
+    Self {
+      descr: schema_descr,
+      props: properties,
+      total_rows_written: None,
+      total_bytes_written: 0,
+      column_index: 0,
+      current_column_writer: None
+    }
+  }
+
+  /// Returns true if there are more column writer available, false otherwise.
+  #[inline]
+  pub fn has_next_column(&mut self) -> bool {
+    self.column_index < self.num_columns()
+  }
+
+  /// Returns the next column writer.
+  /// When no more columns are available, returns `None`.
+  ///
+  /// This method finalises previous column writer, so make sure that all writes are
+  /// finished before calling this method.
+  #[inline]
+  pub fn next_column(&mut self) -> Result<&mut ColumnWriter> {
+    self.finalise_column_writer()?;
+
+    if self.column_index < self.num_columns() {
+      let page_writer = unimplemented!();
+      let column_writer = get_column_writer(
+        self.descr.column(self.column_index),
+        self.props.clone(),
+        page_writer
+      );
+
+      self.column_index += 1;
+
+      self.current_column_writer = Some(column_writer);
+      Ok(self.current_column_writer.as_mut().unwrap())
+    } else {
+      Err(general_err!("No more column writers left"))
+    }
+  }
+
+  /// Returns number of columns in the schema.
+  #[inline]
+  pub fn num_columns(&self) -> usize {
+    self.descr.num_columns()
+  }
+
+  #[inline]
+  pub fn close(&mut self) -> Result<()> {
+    self.finalise_column_writer()?;
+    self.current_column_writer = None;
+    // TODO: update metadata
+    Ok(())
+  }
+
+  /// Checks and finalises current column writer.
+  fn finalise_column_writer(&mut self) -> Result<()> {
+    if let Some(ref mut writer) = self.current_column_writer {
+      let rows_written;
+      let bytes_written;
+
+      match writer {
+        ColumnWriter::BoolColumnWriter(typed) => {
+          typed.close()?;
+          rows_written = typed.get_total_rows_written();
+          bytes_written = typed.get_total_bytes_written();
+        },
+        ColumnWriter::Int32ColumnWriter(typed) => {
+          typed.close()?;
+          rows_written = typed.get_total_rows_written();
+          bytes_written = typed.get_total_bytes_written();
+        },
+        ColumnWriter::Int64ColumnWriter(typed) => {
+          typed.close()?;
+          rows_written = typed.get_total_rows_written();
+          bytes_written = typed.get_total_bytes_written();
+        },
+        ColumnWriter::Int96ColumnWriter(typed) => {
+          typed.close()?;
+          rows_written = typed.get_total_rows_written();
+          bytes_written = typed.get_total_bytes_written();
+        },
+        ColumnWriter::FloatColumnWriter(typed) => {
+          typed.close()?;
+          rows_written = typed.get_total_rows_written();
+          bytes_written = typed.get_total_bytes_written();
+        },
+        ColumnWriter::DoubleColumnWriter(typed) => {
+          typed.close()?;
+          rows_written = typed.get_total_rows_written();
+          bytes_written = typed.get_total_bytes_written();
+        },
+        ColumnWriter::ByteArrayColumnWriter(typed) => {
+          typed.close()?;
+          rows_written = typed.get_total_rows_written();
+          bytes_written = typed.get_total_bytes_written();
+        },
+        ColumnWriter::FixedLenByteArrayColumnWriter(typed) => {
+          typed.close()?;
+          rows_written = typed.get_total_rows_written();
+          bytes_written = typed.get_total_bytes_written();
+        }
+      }
+
+      // Update row group writer metrics
+      self.total_bytes_written += bytes_written;
+      if let Some(rows) = self.total_rows_written {
+        if rows != rows_written {
+          return Err(general_err!(
+            "Incorrect number of rows, expected {} != {} rows",
+            rows,
+            rows_written
+          ));
+        }
+      } else {
+        self.total_rows_written = Some(rows_written);
+      }
+    }
+    Ok(())
+  }
+}
 
 /// Serialized page writer.
 ///
