@@ -1061,7 +1061,7 @@ mod tests {
 
   #[test]
   fn test_dict_encoded_size() {
-    fn run_test<T: DataType>(type_length: i32, values: &[T::T], expected_size: u64) {
+    fn run_test<T: DataType>(type_length: i32, values: &[T::T], expected_size: usize) {
       let mut encoder = create_test_dict_encoder::<T>(type_length);
       assert_eq!(encoder.dict_encoded_size(), 0);
       encoder.put(values).unwrap();
@@ -1092,9 +1092,9 @@ mod tests {
       encoding: Encoding,
       type_length: i32,
       values: &[T::T],
-      initial_size: u64,
-      max_size: u64,
-      flush_size: u64
+      initial_size: usize,
+      max_size: usize,
+      flush_size: usize
     ) {
       let mut encoder = match encoding {
         Encoding::PLAIN_DICTIONARY | Encoding::RLE_DICTIONARY => {
