@@ -23,7 +23,7 @@ use std::mem;
 use std::rc::Rc;
 
 use basic::{Compression, Encoding, Type};
-use column::page::{CompressedPage, Page, PageWriter};
+use column::page::{CompressedPage, PageWriter};
 use compression::{Codec, create_codec};
 use data_type::*;
 use encodings::encoding::{DictEncoder, Encoder, get_encoder};
@@ -530,7 +530,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
     let num_values = self.page_writer.num_values() as i64;
     let dict_page_offset = self.page_writer.dictionary_page_offset().map(|v| v as i64);
     // If data page offset is not set, then no pages have been written
-    let data_page_offset = self.page_writer.data_page_offset().unwrap_or(0) as i64;
+    let data_page_offset = self.page_writer.data_page_offset() as i64;
 
     let file_offset;
     let mut encodings = Vec::new();
@@ -584,27 +584,37 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
   /// Writes compressed data page into underlying sink.
   #[inline]
   fn write_data_page(&mut self, page: CompressedPage) -> Result<()> {
-    self.total_bytes_written += self.page_writer.write_data_page(page)? as u64;
+    self.total_bytes_written += self.page_writer.write_page(page)? as u64;
     Ok(())
   }
 
   /// Writes dictionary page into underlying sink.
-  /// Dictionary encoder should not be used afterwards.
   #[inline]
   fn write_dictionary_page(&mut self) -> Result<()> {
     match self.dict_encoder {
       Some(ref encoder) => {
-        let num_values = encoder.num_entries() as u32;
-        let buf = encoder.write_dict()?;
-        let page = Page::DictionaryPage {
+        let num_values = encoder.num_entries();
+        let uncompressed_buf = encoder.write_dict()?;
+        let uncompressed_size = uncompressed_buf.len();
+
+        let buf = match self.compressor {
+          Some(ref mut cmpr) => {
+            let mut output_buf = Vec::with_capacity(uncompressed_size);
+            cmpr.compress(uncompressed_buf.data(), &mut output_buf)?;
+            ByteBufferPtr::new(output_buf)
+          },
+          None => encoder.write_dict()?
+        };
+
+        let page = CompressedPage::DictionaryPage {
+          uncompressed_size: uncompressed_size,
           buf: buf,
-          num_values: num_values,
+          num_values: num_values as u32,
           encoding: self.props.dictionary_page_encoding(),
           // TODO: is our dictionary data sorted?
           is_sorted: false
         };
-        self.total_bytes_written +=
-          self.page_writer.write_dictionary_page(page)? as u64;
+        self.total_bytes_written += self.page_writer.write_page(page)? as u64;
         Ok(())
       },
       None => Err(general_err!("Dictionary encoder is not set"))

@@ -20,14 +20,13 @@
 use std::io::Write;
 
 use basic::{Compression, PageType};
-use column::page::{CompressedPage, Page, PageWriter};
+use column::page::{CompressedPage, PageWriter};
 use compression::{Codec, create_codec};
 use errors::Result;
 use file::metadata::ColumnChunkMetaData;
 use parquet_format::{DataPageHeader, DataPageHeaderV2, DictionaryPageHeader, PageHeader};
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
 use util::io::{Position, TOutputStream};
-use util::memory::ByteBufferPtr;
 
 // TODO: Clean up metrics that we collect in page writer, see if we actually use any.
 
@@ -42,7 +41,7 @@ pub struct SerializedPageWriter<T: Write + Position> {
   data_page_offset: Option<u64>,
   total_uncompressed_size: u64,
   total_compressed_size: u64,
-  num_values: u64
+  num_values: u32
 }
 
 impl<T: Write + Position> SerializedPageWriter<T> {
@@ -73,25 +72,15 @@ impl<T: Write + Position> SerializedPageWriter<T> {
 }
 
 impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
-  #[inline]
-  fn has_compressor(&self) -> bool {
-    self.compressor.is_some()
-  }
-
-  #[inline]
-  fn compress(&mut self, input_buf: &[u8], output_buf: &mut Vec<u8>) -> Result<()> {
-    assert!(self.has_compressor());
-    self.compressor.as_mut().unwrap().compress(input_buf, output_buf)
-  }
-
-  fn write_data_page(&mut self, page: CompressedPage) -> Result<usize> {
+  fn write_page(&mut self, page: CompressedPage) -> Result<usize> {
     let uncompressed_size = page.uncompressed_size();
     let compressed_size = page.compressed_size();
     let num_values = page.num_values();
     let encoding = page.encoding();
+    let page_type = page.page_type();
 
     let mut page_header = PageHeader {
-      type_: page.page_type().into(),
+      type_: page_type.into(),
       uncompressed_page_size: uncompressed_size as i32,
       compressed_page_size: compressed_size as i32,
       // TODO: Add support for crc checksum
@@ -136,12 +125,32 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
         };
 
         page_header.data_page_header_v2 = Some(data_page_header_v2);
+      },
+      CompressedPage::DictionaryPage { is_sorted, .. } => {
+        let dictionary_page_header = DictionaryPageHeader {
+          num_values: num_values as i32,
+          encoding: encoding.into(),
+          is_sorted: Some(is_sorted)
+        };
+        page_header.dictionary_page_header = Some(dictionary_page_header);
       }
     }
 
     let start_pos = self.sink.pos();
-    if self.data_page_offset.is_none() {
-      self.data_page_offset = Some(start_pos);
+
+    match page_type {
+      PageType::DATA_PAGE | PageType::DATA_PAGE_V2 => {
+        if self.data_page_offset.is_none() {
+          self.data_page_offset = Some(start_pos);
+        }
+      },
+      PageType::DICTIONARY_PAGE => {
+        assert!(self.dictionary_page_offset.is_none(), "Dictionary page is already set");
+        self.dictionary_page_offset = Some(start_pos);
+      }
+      _ => {
+        // Do nothing
+      }
     }
 
     let header_size = self.serialize_page_header(page_header)?;
@@ -149,60 +158,10 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
 
     self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
     self.total_compressed_size += (compressed_size + header_size) as u64;
-    self.num_values += num_values as u64;
+    self.num_values += num_values;
 
     let bytes_written = (self.sink.pos() - start_pos) as usize;
     Ok(bytes_written)
-  }
-
-  fn write_dictionary_page(&mut self, page: Page) -> Result<usize> {
-    match page {
-      Page::DictionaryPage { buf, num_values, encoding, is_sorted } => {
-        let uncompressed_size = buf.len();
-        let buf = if self.has_compressor() {
-          // TODO: reuse output buffer?
-          let mut output_buf = Vec::with_capacity(uncompressed_size);
-          self.compress(buf.data(), &mut output_buf)?;
-          ByteBufferPtr::new(output_buf)
-        } else {
-          buf
-        };
-        let compressed_size = buf.len();
-
-        // Create page headers
-        let dictionary_page_header = DictionaryPageHeader {
-          num_values: num_values as i32,
-          encoding: encoding.into(),
-          is_sorted: Some(is_sorted)
-        };
-
-        let page_header = PageHeader {
-          type_: PageType::DICTIONARY_PAGE.into(),
-          uncompressed_page_size: uncompressed_size as i32,
-          compressed_page_size: compressed_size as i32,
-          // TODO: Add support for crc checksum
-          crc: None,
-          data_page_header: None,
-          index_page_header: None,
-          dictionary_page_header: Some(dictionary_page_header),
-          data_page_header_v2: None,
-        };
-
-        let start_pos = self.sink.pos();
-        assert!(self.dictionary_page_offset.is_none(), "Dictionary page is already set");
-        self.dictionary_page_offset = Some(start_pos);
-        let header_size = self.serialize_page_header(page_header)?;
-        self.sink.write_all(buf.data())?;
-
-        self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
-        self.total_compressed_size += (compressed_size + header_size) as u64;
-
-        // Return number of bytes written
-        let bytes_written = (self.sink.pos() - start_pos) as usize;
-        Ok(bytes_written)
-      }
-      _ => panic!("Write dictionary page only")
-    }
   }
 
   fn write_metadata(&mut self, metadata: &ColumnChunkMetaData) -> Result<()> {
@@ -215,8 +174,8 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
   }
 
   #[inline]
-  fn data_page_offset(&self) -> Option<u64> {
-    self.data_page_offset
+  fn data_page_offset(&self) -> u64 {
+    self.data_page_offset.unwrap_or(0)
   }
 
   #[inline]
@@ -230,7 +189,7 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
   }
 
   #[inline]
-  fn num_values(&self) -> u64 {
+  fn num_values(&self) -> u32 {
     self.num_values
   }
 }

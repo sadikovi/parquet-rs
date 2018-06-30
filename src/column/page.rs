@@ -127,6 +127,13 @@ pub enum CompressedPage {
     rep_levels_byte_len: u32,
     is_compressed: bool,
     statistics: Option<Statistics>
+  },
+  DictionaryPage {
+    uncompressed_size: usize,
+    buf: ByteBufferPtr,
+    num_values: u32,
+    encoding: Encoding,
+    is_sorted: bool
   }
 }
 
@@ -135,7 +142,8 @@ impl CompressedPage {
   pub fn page_type(&self) -> PageType {
     match self {
       CompressedPage::DataPage { .. } => PageType::DATA_PAGE,
-      CompressedPage::DataPageV2 { .. } => PageType::DATA_PAGE_V2
+      CompressedPage::DataPageV2 { .. } => PageType::DATA_PAGE_V2,
+      CompressedPage::DictionaryPage { .. } => PageType::DICTIONARY_PAGE
     }
   }
 
@@ -143,7 +151,8 @@ impl CompressedPage {
   pub fn uncompressed_size(&self) -> usize {
     match *self {
       CompressedPage::DataPage { uncompressed_size, .. } => uncompressed_size,
-      CompressedPage::DataPageV2 { uncompressed_size, .. } => uncompressed_size
+      CompressedPage::DataPageV2 { uncompressed_size, .. } => uncompressed_size,
+      CompressedPage::DictionaryPage { uncompressed_size, .. } => uncompressed_size
     }
   }
 
@@ -154,31 +163,35 @@ impl CompressedPage {
   pub fn compressed_size(&self) -> usize {
     match self {
       CompressedPage::DataPage { buf, .. } => buf.len(),
-      CompressedPage::DataPageV2 { buf, .. } => buf.len()
+      CompressedPage::DataPageV2 { buf, .. } => buf.len(),
+      CompressedPage::DictionaryPage { buf, .. } => buf.len()
     }
   }
 
-  /// Number of values in the data page.
+  /// Number of values in page.
   pub fn num_values(&self) -> u32 {
     match *self {
       CompressedPage::DataPage { num_values, .. } => num_values,
-      CompressedPage::DataPageV2 { num_values, .. } => num_values
+      CompressedPage::DataPageV2 { num_values, .. } => num_values,
+      CompressedPage::DictionaryPage { num_values, .. } => num_values
     }
   }
 
-  /// Returns encoding for values in the data page.
+  /// Returns encoding for values in page.
   pub fn encoding(&self) -> Encoding {
     match *self {
       CompressedPage::DataPage { encoding, .. } => encoding,
-      CompressedPage::DataPageV2 { encoding, .. } => encoding
+      CompressedPage::DataPageV2 { encoding, .. } => encoding,
+      CompressedPage::DictionaryPage { encoding, .. } => encoding
     }
   }
 
-  /// Returns slice of compressed buffer in data page.
+  /// Returns slice of compressed buffer in page.
   pub fn data(&self) -> &[u8] {
     match self {
       CompressedPage::DataPage { buf, .. } => buf.data(),
-      CompressedPage::DataPageV2 { buf, .. } => buf.data()
+      CompressedPage::DataPageV2 { buf, .. } => buf.data(),
+      CompressedPage::DictionaryPage { buf, .. } => buf.data()
     }
   }
 }
@@ -193,20 +206,9 @@ pub trait PageReader {
 
 /// API for writing pages in column chunk.
 pub trait PageWriter {
-  /// Returns `true` if page writer has a compression set.
-  fn has_compressor(&self) -> bool;
-
-  /// Compresses input buffer bytes into output buffer.
-  /// Fails if compressor is not set.
-  fn compress(&mut self, input_buf: &[u8], output_buf: &mut Vec<u8>) -> Result<()>;
-
-  /// Writes data page into the output stream/sink.
+  /// Writes a page into the output stream/sink.
   /// Returns number of bytes written into the sink.
-  fn write_data_page(&mut self, page: CompressedPage) -> Result<usize>;
-
-  /// Writes dictionary page into the output stream/sink.
-  /// Returns number of bytes written into the sink.
-  fn write_dictionary_page(&mut self, page: Page) -> Result<usize>;
+  fn write_page(&mut self, page: CompressedPage) -> Result<usize>;
 
   /// Writes column chunk metadata into the output stream/sink.
   fn write_metadata(&mut self, metadata: &ColumnChunkMetaData) -> Result<()>;
@@ -215,21 +217,21 @@ pub trait PageWriter {
   #[inline]
   fn dictionary_page_offset(&self) -> Option<u64>;
 
-  /// Returns data page (either v1 or v2) offset in bytes, if set.
+  /// Returns data page (either v1 or v2) offset in bytes.
   #[inline]
-  fn data_page_offset(&self) -> Option<u64>;
+  fn data_page_offset(&self) -> u64;
 
-  /// Returns total uncompressed size so far.
+  /// Returns total uncompressed size in bytes so far.
   #[inline]
   fn total_uncompressed_size(&self) -> u64;
 
-  /// Returns total compressed size so far.
+  /// Returns total compressed size in bytes so far.
   #[inline]
   fn total_compressed_size(&self) -> u64;
 
   /// Returns number of values so far.
   #[inline]
-  fn num_values(&self) -> u64;
+  fn num_values(&self) -> u32;
 }
 
 #[cfg(test)]
