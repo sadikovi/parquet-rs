@@ -247,6 +247,16 @@ impl RowGroupMetaData {
       schema_descr
     })
   }
+
+  /// Method to convert to Thrift.
+  pub fn to_thrift(&self) -> RowGroup {
+    RowGroup {
+      columns: self.columns().into_iter().map(|v| v.to_thrift()).collect(),
+      total_byte_size: self.total_byte_size,
+      num_rows: self.num_rows,
+      sorting_columns: None
+    }
+  }
 }
 
 // Builder for row group metadata.
@@ -415,7 +425,7 @@ impl ColumnChunkMetaData {
   }
 
   /// Method to convert from Thrift.
-  fn from_thrift(column_descr: ColumnDescPtr, cc: ColumnChunk) -> Result<Self> {
+  pub fn from_thrift(column_descr: ColumnDescPtr, cc: ColumnChunk) -> Result<Self> {
     if cc.meta_data.is_none() {
       return Err(general_err!("Expected to have column metadata"));
     }
@@ -450,6 +460,35 @@ impl ColumnChunkMetaData {
       statistics
     };
     Ok(result)
+  }
+
+  /// Method to convert to Thrift.
+  pub fn to_thrift(&self) -> ColumnChunk {
+    let column_metadata = ColumnMetaData {
+      type_: self.column_type.into(),
+      encodings: self.encodings().into_iter().map(|&v| v.into()).collect(),
+      path_in_schema: Vec::from(self.column_path.as_slice()),
+      codec: self.compression.into(),
+      num_values: self.num_values,
+      total_uncompressed_size: self.total_uncompressed_size,
+      total_compressed_size: self.total_compressed_size,
+      key_value_metadata: None,
+      data_page_offset: self.data_page_offset,
+      index_page_offset: None,
+      dictionary_page_offset: self.dictionary_page_offset,
+      statistics: None,
+      encoding_stats: None
+    };
+
+    ColumnChunk {
+      file_path: self.file_path().map(|v| v.clone()),
+      file_offset: self.file_offset,
+      meta_data: Some(column_metadata),
+      offset_index_offset: None,
+      offset_index_length: None,
+      column_index_offset: None,
+      column_index_length: None
+    }
   }
 }
 

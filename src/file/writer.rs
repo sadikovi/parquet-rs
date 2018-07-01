@@ -459,33 +459,7 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
   }
 
   fn write_metadata(&mut self, metadata: &ColumnChunkMetaData) -> Result<()> {
-    let column_metadata = parquet::ColumnMetaData {
-      type_: metadata.column_type().into(),
-      encodings: metadata.encodings().iter().map(|&v| v.into()).collect(),
-      path_in_schema: Vec::from(metadata.column_path().as_slice()),
-      codec: metadata.compression().into(),
-      num_values: metadata.num_values(),
-      total_uncompressed_size: metadata.uncompressed_size(),
-      total_compressed_size: metadata.compressed_size(),
-      key_value_metadata: None,
-      data_page_offset: metadata.data_page_offset(),
-      index_page_offset: None,
-      dictionary_page_offset: metadata.dictionary_page_offset(),
-      statistics: None,
-      encoding_stats: None
-    };
-
-    let column_chunk = parquet::ColumnChunk {
-      file_path: metadata.file_path().map(|v| v.clone()),
-      file_offset: metadata.file_offset(),
-      meta_data: Some(column_metadata),
-      offset_index_offset: None,
-      offset_index_length: None,
-      column_index_offset: None,
-      column_index_length: None
-    };
-
-    self.serialize_column_chunk(column_chunk)
+    self.serialize_column_chunk(metadata.to_thrift())
   }
 
   fn close(&mut self) -> Result<()> {
