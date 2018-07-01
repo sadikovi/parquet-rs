@@ -18,7 +18,7 @@
 //! Contains file writer API.
 
 use std::fs::File;
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::rc::Rc;
 
 use basic::PageType;
@@ -30,7 +30,7 @@ use file::{FOOTER_SIZE, PARQUET_MAGIC};
 use file::metadata::*;
 use file::properties::WriterPropertiesPtr;
 use parquet_format as parquet;
-use schema::types::{SchemaDescriptor, SchemaDescPtr, TypePtr};
+use schema::types::{self, SchemaDescriptor, SchemaDescPtr, TypePtr};
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
 use util::io::{FileSink, Position, TOutputStream};
 
@@ -44,7 +44,7 @@ pub struct SerializedFileWriter {
   props: WriterPropertiesPtr,
   ref_count: i32,
   total_num_rows: u64,
-  row_group_metadata: Vec<RowGroupMetaDataPtr>
+  row_groups: Vec<RowGroupMetaDataPtr>
 }
 
 impl SerializedFileWriter {
@@ -58,7 +58,7 @@ impl SerializedFileWriter {
       props: properties,
       ref_count: 0,
       total_num_rows: 0,
-      row_group_metadata: Vec::new()
+      row_groups: Vec::new()
     }
   }
 
@@ -80,7 +80,7 @@ impl SerializedFileWriter {
   ) -> Result<()> {
     self.ref_count -= 1;
     row_group_writer.close()?;
-    self.row_group_metadata.push(row_group_writer.get_row_group_metadata());
+    self.row_groups.push(row_group_writer.get_row_group_metadata());
     Ok(())
   }
 
@@ -101,25 +101,30 @@ impl SerializedFileWriter {
 
   /// Assemble and writes metadata at the end of the file.
   fn write_metadata(&mut self) -> Result<()> {
-    let file_metadata = FileMetaData::new(
-      self.props.writer_version().as_num(),
-      self.total_num_rows as i64,
-      Some(self.props.created_by().to_owned()),
-      self.schema.clone(),
-      self.descr.clone(),
-      None
-    );
+    let file_metadata = parquet::FileMetaData {
+      /// Version of this file *
+      version: self.props.writer_version().as_num(),
+      schema: types::to_thrift(self.schema.as_ref()),
+      num_rows: self.total_num_rows as i64,
+      row_groups: self.row_groups.as_slice().into_iter().map(|v| v.to_thrift()).collect(),
+      key_value_metadata: None,
+      created_by: Some(self.props.created_by().to_owned()),
+      column_orders: None
+    };
 
-    let parquet_metadata = ParquetMetaData::from(
-      file_metadata,
-      self.row_group_metadata.clone()
-    );
-
-    // TODO: serialize metadata into Thrift and update metadata length.
-    let metadata_len: i32 = unimplemented!();
+    // Write file metadata
+    let start_pos = self.file.seek(SeekFrom::Current(0))?;
+    {
+      let transport = TOutputStream::new(&mut self.file);
+      let mut protocol = TCompactOutputProtocol::new(transport);
+      file_metadata.write_to_out_protocol(&mut protocol)?;
+      protocol.flush()?;
+    }
+    let end_pos = self.file.seek(SeekFrom::Current(0))?;
 
     // Write footer
     let mut footer_buffer: [u8; FOOTER_SIZE] = [0; FOOTER_SIZE];
+    let metadata_len = (end_pos - start_pos) as i32;
     LittleEndian::write_i32(&mut footer_buffer, metadata_len);
     (&mut footer_buffer[4..]).write(&PARQUET_MAGIC)?;
     self.file.write(&footer_buffer)?;
