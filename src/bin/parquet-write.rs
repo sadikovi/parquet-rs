@@ -22,9 +22,10 @@ use std::rc::Rc;
 
 use parquet::column::writer::ColumnWriter;
 use parquet::data_type::ByteArray;
-use parquet::file::properties::WriterProperties;
+use parquet::file::properties::{WriterProperties, WriterVersion};
 use parquet::file::writer::{FileWriter, SerializedFileWriter};
 use parquet::schema::parser::parse_message_type;
+use parquet::schema::types::ColumnPath;
 
 fn main() {
   let file = File::create("./sample.parquet").unwrap();
@@ -37,7 +38,10 @@ fn main() {
   }
   ";
   let schema = parse_message_type(message_type).unwrap();
-  let properties = WriterProperties::builder().build();
+  let properties = WriterProperties::builder()
+    .set_col_dictionary_enabled(ColumnPath::from("c"), false)
+    .set_writer_version(WriterVersion::PARQUET_1_0)
+    .build();
 
   let mut writer = SerializedFileWriter::new(file, Rc::new(schema), Rc::new(properties));
 
