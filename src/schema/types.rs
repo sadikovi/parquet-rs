@@ -869,6 +869,70 @@ fn from_thrift_helper(
   }
 }
 
+/// Method to convert to Thrift.
+pub fn to_thrift(schema: &Type) -> Vec<SchemaElement> {
+  assert!(schema.is_group(), "Root schema must be Group type");
+  let mut elements: Vec<SchemaElement> = Vec::new();
+  to_thrift_helper(schema, &mut elements);
+  elements
+}
+
+/// Constructs list of `SchemaElement` from the schema using depth-first traversal.
+/// Here we assume that schema is always valid and starts with group type.
+fn to_thrift_helper(schema: &Type, elements: &mut Vec<SchemaElement>) {
+  match *schema {
+    Type::PrimitiveType {
+      ref basic_info,
+      physical_type,
+      type_length,
+      scale,
+      precision
+    } => {
+      let element = SchemaElement {
+        type_: Some(physical_type.into()),
+        type_length: if type_length > 0 { Some(type_length) } else { None },
+        repetition_type: Some(basic_info.repetition().into()),
+        name: basic_info.name().to_owned(),
+        num_children: None,
+        converted_type: basic_info.logical_type().into(),
+        scale: if scale > 0 { Some(scale) } else { None },
+        precision: if precision > 0 { Some(precision) } else { None },
+        field_id: if basic_info.has_id() { Some(basic_info.id()) } else { None },
+        logical_type: None
+      };
+
+      elements.push(element);
+    },
+    Type::GroupType { ref basic_info, ref fields } => {
+      let repetition = if basic_info.has_repetition() {
+        Some(basic_info.repetition().into())
+      } else {
+        None
+      };
+
+      let element = SchemaElement {
+        type_: None,
+        type_length: None,
+        repetition_type: repetition,
+        name: basic_info.name().to_owned(),
+        num_children: Some(fields.len() as i32),
+        converted_type: basic_info.logical_type().into(),
+        scale: None,
+        precision: None,
+        field_id: if basic_info.has_id() { Some(basic_info.id()) } else { None },
+        logical_type: None
+      };
+
+      elements.push(element);
+
+      // Add child elements for a group
+      for field in fields {
+        to_thrift_helper(field, elements);
+      }
+    }
+  }
+}
+
 
 #[cfg(test)]
 mod tests {
