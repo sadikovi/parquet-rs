@@ -215,23 +215,23 @@ pub trait PageWriter {
 
   /// Returns dictionary page offset in bytes, if set.
   #[inline]
-  fn dictionary_page_offset(&self) -> Option<usize>;
+  fn dictionary_page_offset(&self) -> Option<u64>;
 
   /// Returns data page (either v1 or v2) offset in bytes.
   #[inline]
-  fn data_page_offset(&self) -> usize;
+  fn data_page_offset(&self) -> u64;
 
   /// Returns total uncompressed size in bytes so far.
   #[inline]
-  fn total_uncompressed_size(&self) -> usize;
+  fn total_uncompressed_size(&self) -> u64;
 
   /// Returns total compressed size in bytes so far.
   #[inline]
-  fn total_compressed_size(&self) -> usize;
+  fn total_compressed_size(&self) -> u64;
 
   /// Returns number of values so far.
   #[inline]
-  fn num_values(&self) -> usize;
+  fn num_values(&self) -> u32;
 }
 
 #[cfg(test)]
