@@ -476,6 +476,8 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
         if self.data_page_offset.is_none() {
           self.data_page_offset = Some(start_pos);
         }
+        // Number of values is incremented for data pages only
+        self.num_values += num_values;
       },
       PageType::DICTIONARY_PAGE => {
         assert!(self.dictionary_page_offset.is_none(), "Dictionary page is already set");
@@ -491,7 +493,6 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
 
     self.total_uncompressed_size += (uncompressed_size + header_size) as u64;
     self.total_compressed_size += (compressed_size + header_size) as u64;
-    self.num_values += num_values;
 
     let bytes_written = (self.sink.pos() - start_pos) as usize;
     Ok(bytes_written)
