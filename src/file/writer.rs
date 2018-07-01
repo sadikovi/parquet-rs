@@ -34,6 +34,51 @@ use schema::types::{self, SchemaDescriptor, SchemaDescPtr, TypePtr};
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
 use util::io::{FileSink, Position, TOutputStream};
 
+/// File writer interface.
+pub trait FileWriter {
+  /// Creates new row group from this file writer.
+  fn create_row_group(&mut self) -> Box<RowGroupWriter>;
+
+  /// Adds new row group to the file.
+  /// Must be the one that was requested using `new_row_group()` method.
+  fn append_row_group(&mut self, row_group_writer: Box<RowGroupWriter>) -> Result<()>;
+
+  /// Closes and finalises file writer.
+  ///
+  /// All row groups must be appended before this method is called.
+  /// No writes are allowed after this point.
+  fn close(&mut self) -> Result<()>;
+}
+
+/// Row group writer interface.
+pub trait RowGroupWriter {
+  /// Returns number of columns in the schema.
+  fn num_columns(&self) -> usize;
+
+  /// Returns current column index.
+  fn column_index(&self) -> usize;
+
+  /// Returns true if there are more column writer available, false otherwise.
+  fn has_next_column(&self) -> bool;
+
+  /// Returns the next column writer.
+  /// When no more columns are available, returns `None`.
+  ///
+  /// This method finalises previous column writer, so make sure that all writes are
+  /// finished before calling this method.
+  fn next_column(&mut self) -> Result<&mut ColumnWriter>;
+
+  /// Closes this row group writer and updates row group metadata.
+  fn close(&mut self) -> Result<()>;
+
+  /// Returns row group metadata.
+  /// Method is only available after `close()` is called.
+  fn get_row_group_metadata(&self) -> RowGroupMetaDataPtr;
+}
+
+// ----------------------------------------------------------------------
+// Serialized impl for file & row group writers
+
 /// Serialized file writer.
 ///
 /// The main entrypoint of writing a Parquet file.
@@ -60,37 +105,6 @@ impl SerializedFileWriter {
       total_num_rows: 0,
       row_groups: Vec::new()
     }
-  }
-
-  /// Creates new row group from this file writer.
-  pub fn new_row_group(&mut self) -> SerializedRowGroupWriter {
-    let writer = SerializedRowGroupWriter::new(
-      self.descr.clone(),
-      self.props.clone(),
-      &self.file
-    );
-    self.ref_count += 1;
-    writer
-  }
-
-  /// Adds new row group to the file.
-  pub fn append_row_group(
-    &mut self,
-    mut row_group_writer: SerializedRowGroupWriter
-  ) -> Result<()> {
-    self.ref_count -= 1;
-    row_group_writer.close()?;
-    self.row_groups.push(row_group_writer.get_row_group_metadata());
-    Ok(())
-  }
-
-  /// Closes and finalises file writer.
-  ///
-  /// All row groups must be appended.
-  /// No writes are allowed after this point.
-  pub fn close(mut self) -> Result<()> {
-    assert_eq!(self.ref_count, 0, "Row group count mismatch ({})", self.ref_count);
-    self.write_metadata()
   }
 
   /// Writes magic bytes at the beginning of the file.
@@ -132,6 +146,33 @@ impl SerializedFileWriter {
   }
 }
 
+impl FileWriter for SerializedFileWriter {
+  fn create_row_group(&mut self) -> Box<RowGroupWriter> {
+    let writer = SerializedRowGroupWriter::new(
+      self.descr.clone(),
+      self.props.clone(),
+      &self.file
+    );
+    self.ref_count += 1;
+    Box::new(writer)
+  }
+
+  fn append_row_group(
+    &mut self,
+    mut row_group_writer: Box<RowGroupWriter>
+  ) -> Result<()> {
+    self.ref_count -= 1;
+    row_group_writer.close()?;
+    self.row_groups.push(row_group_writer.get_row_group_metadata());
+    Ok(())
+  }
+
+  fn close(&mut self) -> Result<()> {
+    assert_eq!(self.ref_count, 0, "Row group count mismatch ({})", self.ref_count);
+    self.write_metadata()
+  }
+}
+
 /// Serialized row group writer.
 ///
 /// Coordinates writing of a row group with column writers.
@@ -165,84 +206,6 @@ impl SerializedRowGroupWriter {
       row_group_metadata: None,
       column_chunks: Vec::with_capacity(num_columns)
     }
-  }
-
-  /// Returns number of columns in the schema.
-  #[inline]
-  pub fn num_columns(&self) -> usize {
-    self.descr.num_columns()
-  }
-
-  /// Returns current column index.
-  #[inline]
-  pub fn column_index(&self) -> usize {
-    self.column_index
-  }
-
-  /// Returns true if there are more column writer available, false otherwise.
-  #[inline]
-  pub fn has_next_column(&self) -> bool {
-    self.column_index < self.num_columns() && self.row_group_metadata.is_none()
-  }
-
-  /// Returns the next column writer.
-  /// When no more columns are available, returns `None`.
-  ///
-  /// This method finalises previous column writer, so make sure that all writes are
-  /// finished before calling this method.
-  #[inline]
-  pub fn next_column(&mut self) -> Result<&mut ColumnWriter> {
-    if self.row_group_metadata.is_some() {
-      return Err(general_err!("Row group writer is closed"));
-    }
-
-    self.finalise_column_writer()?;
-    if self.column_index < self.num_columns() {
-      let sink = FileSink::new(&self.file);
-      let page_writer = Box::new(SerializedPageWriter::new(sink));
-      let column_writer = get_column_writer(
-        self.descr.column(self.column_index),
-        self.props.clone(),
-        page_writer
-      );
-
-      self.column_index += 1;
-
-      self.current_column_writer = Some(column_writer);
-      Ok(self.current_column_writer.as_mut().unwrap())
-    } else {
-      Err(general_err!("No more column writers left"))
-    }
-  }
-
-  /// Closes this row group writer and updates row group metadata.
-  #[inline]
-  pub fn close(&mut self) -> Result<()> {
-    if self.row_group_metadata.is_none() {
-      self.finalise_column_writer()?;
-      self.current_column_writer = None;
-
-      let row_group_metadata =
-        RowGroupMetaDataBuilder::new(self.descr.clone())
-          .set_column_metadata(self.column_chunks.clone())
-          .set_total_byte_size(self.total_bytes_written as i64)
-          .set_num_rows(self.total_rows_written.unwrap_or(0) as i64)
-          .build();
-
-      self.row_group_metadata = Some(Rc::new(row_group_metadata));
-    }
-
-    Ok(())
-  }
-
-  #[inline]
-  pub fn get_row_group_metadata(&self) -> RowGroupMetaDataPtr {
-    assert!(
-      self.row_group_metadata.is_some(),
-      "Row group metadata is not available, row group writer is not closed"
-    );
-
-    self.row_group_metadata.clone().unwrap()
   }
 
   /// Checks and finalises current column writer.
@@ -319,6 +282,77 @@ impl SerializedRowGroupWriter {
       }
     }
     Ok(())
+  }
+}
+
+impl RowGroupWriter for SerializedRowGroupWriter {
+  #[inline]
+  fn num_columns(&self) -> usize {
+    self.descr.num_columns()
+  }
+
+  #[inline]
+  fn column_index(&self) -> usize {
+    self.column_index
+  }
+
+  #[inline]
+  fn has_next_column(&self) -> bool {
+    self.column_index < self.num_columns() && self.row_group_metadata.is_none()
+  }
+
+  #[inline]
+  fn next_column(&mut self) -> Result<&mut ColumnWriter> {
+    if self.row_group_metadata.is_some() {
+      return Err(general_err!("Row group writer is closed"));
+    }
+
+    self.finalise_column_writer()?;
+    if self.column_index < self.num_columns() {
+      let sink = FileSink::new(&self.file);
+      let page_writer = Box::new(SerializedPageWriter::new(sink));
+      let column_writer = get_column_writer(
+        self.descr.column(self.column_index),
+        self.props.clone(),
+        page_writer
+      );
+
+      self.column_index += 1;
+
+      self.current_column_writer = Some(column_writer);
+      Ok(self.current_column_writer.as_mut().unwrap())
+    } else {
+      Err(general_err!("No more column writers left"))
+    }
+  }
+
+  #[inline]
+  fn close(&mut self) -> Result<()> {
+    if self.row_group_metadata.is_none() {
+      self.finalise_column_writer()?;
+      self.current_column_writer = None;
+
+      let row_group_metadata =
+        RowGroupMetaDataBuilder::new(self.descr.clone())
+          .set_column_metadata(self.column_chunks.clone())
+          .set_total_byte_size(self.total_bytes_written as i64)
+          .set_num_rows(self.total_rows_written.unwrap_or(0) as i64)
+          .build();
+
+      self.row_group_metadata = Some(Rc::new(row_group_metadata));
+    }
+
+    Ok(())
+  }
+
+  #[inline]
+  fn get_row_group_metadata(&self) -> RowGroupMetaDataPtr {
+    assert!(
+      self.row_group_metadata.is_some(),
+      "Row group metadata is not available, row group writer is not closed"
+    );
+
+    self.row_group_metadata.clone().unwrap()
   }
 }
 
