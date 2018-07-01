@@ -252,6 +252,7 @@ impl<T: DataType> ColumnWriterImpl<T> where T: 'static {
       }
       self.flush_data_pages()?;
       self.write_column_metadata()?;
+      self.page_writer.close()?;
       self.dict_encoder = None;
     }
 

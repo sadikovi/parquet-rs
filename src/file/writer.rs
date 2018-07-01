@@ -17,27 +17,114 @@
 
 //! Contains file writer API.
 
+use std::fs::File;
 use std::io::Write;
 use std::rc::Rc;
 
 use basic::PageType;
+use byteorder::{LittleEndian, ByteOrder};
 use column::page::{CompressedPage, PageWriter};
 use column::writer::{ColumnWriter, get_column_writer};
 use errors::{ParquetError, Result};
+use file::{FOOTER_SIZE, PARQUET_MAGIC};
 use file::metadata::*;
 use file::properties::WriterPropertiesPtr;
 use parquet_format as parquet;
-use schema::types::SchemaDescPtr;
+use schema::types::{SchemaDescriptor, SchemaDescPtr, TypePtr};
 use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
-use util::io::{Position, TOutputStream};
+use util::io::{FileSink, Position, TOutputStream};
 
 /// Serialized file writer.
 ///
 /// The main entrypoint of writing a Parquet file.
 pub struct SerializedFileWriter {
+  file: File,
+  schema: TypePtr,
+  descr: SchemaDescPtr,
+  props: WriterPropertiesPtr,
+  ref_count: i32,
+  total_num_rows: u64,
+  row_group_metadata: Vec<RowGroupMetaDataPtr>
 }
 
 impl SerializedFileWriter {
+  /// Creates new file writer.
+  pub fn new(mut file: File, schema: TypePtr, properties: WriterPropertiesPtr) -> Self {
+    Self::start_file(&mut file).expect("Start Parquet file");
+    Self {
+      file: file,
+      schema: schema.clone(),
+      descr: Rc::new(SchemaDescriptor::new(schema)),
+      props: properties,
+      ref_count: 0,
+      total_num_rows: 0,
+      row_group_metadata: Vec::new()
+    }
+  }
+
+  /// Creates new row group from this file writer.
+  pub fn new_row_group(&mut self) -> SerializedRowGroupWriter {
+    let writer = SerializedRowGroupWriter::new(
+      self.descr.clone(),
+      self.props.clone(),
+      &self.file
+    );
+    self.ref_count += 1;
+    writer
+  }
+
+  /// Adds new row group to the file.
+  pub fn append_row_group(
+    &mut self,
+    mut row_group_writer: SerializedRowGroupWriter
+  ) -> Result<()> {
+    self.ref_count -= 1;
+    row_group_writer.close()?;
+    self.row_group_metadata.push(row_group_writer.get_row_group_metadata());
+    Ok(())
+  }
+
+  /// Closes and finalises file writer.
+  ///
+  /// All row groups must be appended.
+  /// No writes are allowed after this point.
+  pub fn close(mut self) -> Result<()> {
+    assert_eq!(self.ref_count, 0, "Row group count mismatch ({})", self.ref_count);
+    self.write_metadata()
+  }
+
+  /// Writes magic bytes at the beginning of the file.
+  fn start_file(file: &mut File) -> Result<()> {
+    file.write(&PARQUET_MAGIC)?;
+    Ok(())
+  }
+
+  /// Assemble and writes metadata at the end of the file.
+  fn write_metadata(&mut self) -> Result<()> {
+    let file_metadata = FileMetaData::new(
+      self.props.writer_version().as_num(),
+      self.total_num_rows as i64,
+      Some(self.props.created_by().to_owned()),
+      self.schema.clone(),
+      self.descr.clone(),
+      None
+    );
+
+    let parquet_metadata = ParquetMetaData::from(
+      file_metadata,
+      self.row_group_metadata.clone()
+    );
+
+    // TODO: serialize metadata into Thrift and update metadata length.
+    let metadata_len: i32 = unimplemented!();
+
+    // Write footer
+    let mut footer_buffer: [u8; FOOTER_SIZE] = [0; FOOTER_SIZE];
+    LittleEndian::write_i32(&mut footer_buffer, metadata_len);
+    (&mut footer_buffer[4..]).write(&PARQUET_MAGIC)?;
+    self.file.write(&footer_buffer)?;
+    Ok(())
+  }
 }
 
 /// Serialized row group writer.
@@ -46,6 +133,7 @@ impl SerializedFileWriter {
 pub struct SerializedRowGroupWriter {
   descr: SchemaDescPtr,
   props: WriterPropertiesPtr,
+  file: File,
   total_rows_written: Option<usize>,
   total_bytes_written: usize,
   column_index: usize,
@@ -55,11 +143,16 @@ pub struct SerializedRowGroupWriter {
 }
 
 impl SerializedRowGroupWriter {
-  pub fn new(schema_descr: SchemaDescPtr, properties: WriterPropertiesPtr) -> Self {
+  pub fn new(
+    schema_descr: SchemaDescPtr,
+    properties: WriterPropertiesPtr,
+    file: &File
+  ) -> Self {
     let num_columns = schema_descr.num_columns();
     Self {
       descr: schema_descr,
       props: properties,
+      file: file.try_clone().unwrap(),
       total_rows_written: None,
       total_bytes_written: 0,
       column_index: 0,
@@ -100,7 +193,8 @@ impl SerializedRowGroupWriter {
 
     self.finalise_column_writer()?;
     if self.column_index < self.num_columns() {
-      let page_writer = unimplemented!();
+      let sink = FileSink::new(&self.file);
+      let page_writer = Box::new(SerializedPageWriter::new(sink));
       let column_writer = get_column_writer(
         self.descr.column(self.column_index),
         self.props.clone(),
@@ -392,6 +486,11 @@ impl<T: Write + Position> PageWriter for SerializedPageWriter<T> {
     };
 
     self.serialize_column_chunk(column_chunk)
+  }
+
+  fn close(&mut self) -> Result<()> {
+    self.sink.flush()?;
+    Ok(())
   }
 
   #[inline]

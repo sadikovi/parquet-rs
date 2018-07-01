@@ -213,6 +213,9 @@ pub trait PageWriter {
   /// Writes column chunk metadata into the output stream/sink.
   fn write_metadata(&mut self, metadata: &ColumnChunkMetaData) -> Result<()>;
 
+  /// Closes resources and flushes underlying sink.
+  fn close(&mut self) -> Result<()>;
+
   /// Returns dictionary page offset in bytes, if set.
   #[inline]
   fn dictionary_page_offset(&self) -> Option<u64>;
