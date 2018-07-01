@@ -56,6 +56,16 @@ pub enum WriterVersion {
   PARQUET_2_0
 }
 
+impl WriterVersion {
+  /// Returns writer version as `i32`.
+  pub fn as_num(&self) -> i32 {
+    match self {
+      WriterVersion::PARQUET_1_0 => 1,
+      WriterVersion::PARQUET_2_0 => 2
+    }
+  }
+}
+
 const DEFAULT_PAGE_SIZE: usize = 1024 * 1024;
 const DEFAULT_WRITE_BATCH_SIZE: usize = 1024;
 const DEFAULT_WRITER_VERSION: WriterVersion = WriterVersion::PARQUET_1_0;
@@ -117,6 +127,11 @@ impl WriterProperties {
   /// Returns configured writer version.
   pub fn writer_version(&self) -> WriterVersion {
     self.writer_version
+  }
+
+  /// Returns created_by string.
+  pub fn created_by(&self) -> &str {
+    &self.created_by
   }
 
   /// Returns encoding for a data page, when dictionary encoding is enabled.

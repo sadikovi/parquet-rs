@@ -17,7 +17,7 @@
 
 use std::cmp;
 use std::fs::File;
-use std::io::{BufReader, Error, ErrorKind, Read, Result, Seek, SeekFrom, Write};
+use std::io::*;
 use std::sync::Mutex;
 
 use thrift::transport::TWriteTransport;
@@ -69,9 +69,50 @@ impl Read for FileChunk {
 ///
 /// Tracks the current position in the stream.
 /// Should be used together with `Write` trait.
+/// This does not require &mut self to get the position.
 pub trait Position {
   /// Returns the current position in the stream.
   fn pos(&self) -> u64;
+}
+
+/// Struct that represents File output stream with position tracking.
+/// Used as a sink in file writer.
+pub struct FileSink {
+  buf: BufWriter<File>,
+  // This is not necessarily position within the file,
+  // rather current position in the sink.
+  pos: u64
+}
+
+impl FileSink {
+  /// Creates new file sink.
+  /// Position is set to whatever position file has.
+  pub fn new(file: &File) -> Self {
+    let mut owned_file = file.try_clone().unwrap();
+    let pos = owned_file.seek(SeekFrom::Current(0)).unwrap();
+    Self {
+      buf: BufWriter::new(owned_file),
+      pos: pos
+    }
+  }
+}
+
+impl Write for FileSink {
+  fn write(&mut self, buf: &[u8]) -> Result<usize> {
+    let num_bytes = self.buf.write(buf)?;
+    self.pos += num_bytes as u64;
+    Ok(num_bytes)
+  }
+
+  fn flush(&mut self) -> Result<()> {
+    self.buf.flush()
+  }
+}
+
+impl Position for FileSink {
+  fn pos(&self) -> u64 {
+    self.pos
+  }
 }
 
 /// Output stream as a thin wrapper for `PosWrite`.

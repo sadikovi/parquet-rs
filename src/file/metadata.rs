@@ -58,6 +58,18 @@ impl ParquetMetaData {
     }
   }
 
+  /// Creates Parquet metadata from file metadata and a list of row group metadata `Rc`s
+  /// for each available row group.
+  pub fn from(
+    file_metadata: FileMetaData,
+    row_group_ptrs: Vec<RowGroupMetaDataPtr>
+  ) -> Self {
+    ParquetMetaData {
+      file_metadata: Rc::new(file_metadata),
+      row_groups: row_group_ptrs
+    }
+  }
+
   /// Returns file metadata as reference counted clone.
   pub fn file_metadata(&self) -> FileMetaDataPtr {
     self.file_metadata.clone()
