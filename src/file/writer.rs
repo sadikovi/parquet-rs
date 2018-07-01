@@ -116,7 +116,9 @@ impl SerializedFileWriter {
   /// Assemble and writes metadata at the end of the file.
   fn write_metadata(&mut self) -> Result<()> {
     let file_metadata = parquet::FileMetaData {
-      /// Version of this file *
+      // Version of this file
+      // TODO: check what this field means! looks like Spark writes "1" even for file
+      // with data page v2 file.
       version: self.props.writer_version().as_num(),
       schema: types::to_thrift(self.schema.as_ref()),
       num_rows: self.total_num_rows as i64,
