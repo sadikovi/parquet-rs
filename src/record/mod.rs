@@ -19,6 +19,7 @@
 
 pub mod reader;
 mod api;
+mod inference;
 mod triplet;
 
 pub use self::api::{Row, RowAccessor, List, ListAccessor, Map, MapAccessor};
