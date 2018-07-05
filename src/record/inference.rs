@@ -17,8 +17,11 @@
 
 //! Methods to infer schema from `Row`.
 
+use std::cmp;
 use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 
+use basic::Repetition;
 use errors::{ParquetError, Result};
 use record::api::Row;
 use schema::types::{Type as SchemaType, TypePtr};
@@ -54,28 +57,7 @@ fn merge_schema(left: SchemaType, right: SchemaType) -> Result<SchemaType> {
   if !right.is_schema() {
     return Err(general_err!("Expected message type, found {:?}", right));
   }
-
-  let mut fields = topological(left.get_fields(), right.get_fields())?;
-  // In order to merge 2 sets of fields we apply topological sort to ensure that schema
-  // can be merged (no cycles), and we also preserve the relative order of the fields,
-  // e.g.
-  // [a, b] and [c, a, d] => [c, a, b, d]
-
-  // {"a": 1, "b": 2}
-  // {"c": 3, "a": 1, "d": 4}
-  // {"c": 3, "b": 2, "d": 4}
-  // [c, a, b, d]
-
-  // Schemas can have different set of fields, but the ones that match will have the same
-  // type, e.g. Primitive == Primitive, Group == Group, but never Primitive != Group.
-  // {"a": 1, "b": 2}
-  // {"a": 1, "c": 3, "d": 4}
-  // {"a" not null, "b" null, "c" null, "d" null}
-  // {"a": 1, "b": 2}
-  // {"b": 2, "a": 1}
-  SchemaType::group_type_builder("schema")
-    .with_fields(&mut fields)
-    .build()
+  unimplemented!();
 }
 
 /// Performs topological sort on fields to reconstruct the order.
@@ -84,8 +66,7 @@ fn topological(first: &[TypePtr], second: &[TypePtr]) -> Result<Vec<TypePtr>> {
 
   // Prepare links
   let mut links: HashMap<&str, TypePtr> = HashMap::with_capacity(len);
-  add_links(&mut links, first)?;
-  add_links(&mut links, second)?;
+  merge_and_update_types(&mut links, first, second)?;
 
   // Prepare edges
   let mut edges: HashMap<&str, Vec<&str>> = HashMap::with_capacity(len);
@@ -125,26 +106,96 @@ fn topological(first: &[TypePtr], second: &[TypePtr]) -> Result<Vec<TypePtr>> {
 }
 
 /// Adds links from vertices.
-fn add_links<'a, 'b>(
+fn merge_and_update_types<'a, 'b>(
   links: &'a mut HashMap<&'b str, TypePtr>,
-  vertices: &'b [TypePtr]
+  left: &'b [TypePtr],
+  right: &'b [TypePtr]
 ) -> Result<()> {
-  for ptr in vertices {
-    if !links.contains_key(ptr.name()) {
-      links.insert(ptr.name(), ptr.clone());
-    } else {
-      let exp = &links[ptr.name()];
-      if exp.is_group() && ptr.is_group() {
-        unimplemented!();
-      } else if exp.is_primitive() && ptr.is_primitive() {
-        unimplemented!();
-      } else {
-        return Err(general_err!("Type mismatch: {:?} != {:?}", exp, ptr));
-      }
+  for tpe in left {
+    links.insert(tpe.name(), tpe.clone());
+  }
+  for tpe in right {
+    let upd = match links.get(tpe.name()) {
+      Some(obj) => merge_types(tpe, obj)?,
+      None => tpe.clone()
+    };
+    links.insert(tpe.name(), upd);
+  }
+  Ok(())
+}
+
+/// Merges two types into one, if possible.
+/// Both types have the same name.
+fn merge_types(left: &TypePtr, right: &TypePtr) -> Result<TypePtr> {
+  let left_info = left.get_basic_info();
+  let right_info = right.get_basic_info();
+
+  let compatible =
+    left_info.name() == right_info.name() &&
+    left_info.logical_type() == right_info.logical_type();
+
+  if left.is_group() && right.is_group() && compatible {
+    let builder = SchemaType::group_type_builder(left_info.name())
+      .with_logical_type(left_info.logical_type())
+      .with_fields(&mut topological(left.get_fields(), right.get_fields())?);
+
+    if left_info.has_repetition() && right_info.has_repetition() {
+      let left_rep = left_info.repetition();
+      let right_rep = right_info.repetition();
+      let repetition = merge_repetition(left_rep, right_rep)?;
+      return Ok(Rc::new(builder.with_repetition(repetition).build()?));
+    } else if !left_info.has_repetition() && !right_info.has_repetition() {
+      return Ok(Rc::new(builder.build()?));
     }
+  } else if left.is_primitive() && right.is_primitive() {
+    let repetition = merge_repetition(left_info.repetition(), right_info.repetition())?;
+    let mut max_length = 0;
+    let mut max_scale = 0;
+    let mut max_precision = 0;
+
+    match **left {
+      SchemaType::PrimitiveType { physical_type, type_length, scale, precision, .. } => {
+        max_length = cmp::max(max_length, type_length);
+        max_precision = cmp::max(max_precision, precision);
+        max_scale = cmp::max(max_scale, scale);
+      },
+      _ => { }
+    }
+
+    match **right {
+      SchemaType::PrimitiveType { physical_type, type_length, scale, precision, .. } => {
+        max_length = cmp::max(max_length, type_length);
+        max_precision = cmp::max(max_precision, precision);
+        max_scale = cmp::max(max_scale, scale);
+      },
+      _ => { }
+    }
+
+    let builder =
+      SchemaType::primitive_type_builder(left.name(), left.get_physical_type())
+        .with_repetition(repetition)
+        .with_logical_type(left_info.logical_type())
+        .with_length(max_length)
+        .with_precision(max_precision)
+        .with_scale(max_scale);
+
+    return Ok(Rc::new(builder.build()?));
   }
 
-  Ok(())
+  return Err(general_err!("Cannot merge types: {:?} != {:?}", left, right));
+}
+
+/// Merges repetition, if possible.
+fn merge_repetition(rep1: Repetition, rep2: Repetition) -> Result<Repetition> {
+  if rep1 == rep2 {
+    Ok(rep1)
+  } else if rep1 == Repetition::REQUIRED && rep2 == Repetition::OPTIONAL {
+    Ok(Repetition::OPTIONAL)
+  } else if rep1 == Repetition::OPTIONAL && rep2 == Repetition::REQUIRED {
+    Ok(Repetition::OPTIONAL)
+  } else {
+    Err(general_err!("Cannot merge repetitions: {} and {}", rep1, rep2))
+  }
 }
 
 /// Adds/updates edges from vertices.
@@ -153,7 +204,6 @@ fn add_edges<'a, 'b>(
   vertices: &'b [TypePtr]
 ) {
   let len = vertices.len();
-
   for i in 0..len {
     let key = vertices[i].name();
     if !edges.contains_key(key) {
@@ -187,8 +237,6 @@ fn collect_counts<'a>(
 
 #[cfg(test)]
 mod tests {
-  use std::rc::Rc;
-
   use super::*;
 
   #[test]
