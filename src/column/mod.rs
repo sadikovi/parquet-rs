@@ -15,13 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! Low level column reader API.
+//! Low level column reader and writer APIs.
 //!
-//! This API is designed for the direct mapping with subsequent manual handling of
-//! definition and repetition levels and spacing. This allows to create column vectors
-//! and batches and map them directly to Parquet data.
-//!
-//! See below an example of using the API.
+//! This API is designed for reading and writing column values, definition and repetition
+//! levels directly.
 //!
 //! # Example
 //!

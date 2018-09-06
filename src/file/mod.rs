@@ -16,11 +16,12 @@
 // under the License.
 
 //! Main entrypoint for working with Parquet API.
-//! Provides access to file and row group readers, record API, etc.
 //!
-//! See [`reader::SerializedFileReader`] for a starting reference,
-//! [`metadata::ParquetMetaData`] for file metadata, and [`statistics`] for working
-//! with statistics.
+//! Provides access to file and row group readers and writers, record API, metadata, etc.
+//!
+//! See [`reader::SerializedFileReader`] or [`writer::SerializedFileWriter`] for a
+//! starting reference, [`metadata::ParquetMetaData`] for file metadata,
+//! and [`statistics`] for working with statistics.
 //!
 //! # Example
 //!
