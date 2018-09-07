@@ -44,12 +44,15 @@
 //! # Example of writing a new file
 //!
 //! ```rust
-//! use std::fs;
+//!use std::fs;
 //! use std::path::Path;
 //! use std::rc::Rc;
+//!
 //! use parquet::file::properties::WriterProperties;
 //! use parquet::file::writer::{FileWriter, SerializedFileWriter};
 //! use parquet::schema::parser::parse_message_type;
+//!
+//! let path = Path::new("target/debug/examples/sample.parquet");
 //!
 //! let message_type = "
 //!   message schema {
@@ -57,12 +60,8 @@
 //!   }
 //! ";
 //! let schema = Rc::new(parse_message_type(message_type).unwrap());
-//!
 //! let props = Rc::new(WriterProperties::builder().build());
-//!
-//! let path = Path::new("target/debug/examples/sample.parquet");
 //! let file = fs::File::create(&path).unwrap();
-//!
 //! let mut writer = SerializedFileWriter::new(file, schema, props).unwrap();
 //! let mut row_group_writer = writer.next_row_group().unwrap();
 //! while let Some(mut col_writer) = row_group_writer.next_column().unwrap() {
