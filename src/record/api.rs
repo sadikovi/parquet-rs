@@ -145,7 +145,7 @@ impl fmt::Display for Row {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     write!(f, "{{")?;
     for (i, &(ref key, ref value)) in self.fields.iter().enumerate() {
-      key.fmt(f)?;
+      write!(f, "\"{}\"", key)?;
       write!(f, ": ")?;
       value.fmt(f)?;
       if i < self.fields.len() - 1 {
@@ -603,7 +603,7 @@ impl fmt::Display for Field {
         write!(f, "{{")?;
         for (i, &(ref key, ref value)) in entries.iter().enumerate() {
           key.fmt(f)?;
-          write!(f, " -> ")?;
+          write!(f, ": ")?;
           value.fmt(f)?;
           if i < entries.len() - 1 {
             write!(f, ", ")?;
