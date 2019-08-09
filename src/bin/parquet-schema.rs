@@ -52,7 +52,7 @@
 
 extern crate parquet;
 
-use std::{env, fs::File, path::Path, process};
+use std::{env, fs::File, path::Path, io::Write, process};
 
 use parquet::{
   file::reader::{FileReader, SerializedFileReader},
@@ -88,6 +88,29 @@ fn main() {
       println!("");
       if verbose {
         print_parquet_metadata(&mut std::io::stdout(), &metadata);
+
+        let out = &mut std::io::stdout();
+        writeln!(out, "--------------------------------------------------------------------------------").unwrap();
+        writeln!(out, "Page metadata").unwrap();
+        writeln!(out, "--------------------------------------------------------------------------------").unwrap();
+        writeln!(out, "").unwrap();
+        for i in 0..parquet_reader.num_row_groups() {
+          writeln!(out, "Row group {}", i).unwrap();
+          writeln!(out, "---------------").unwrap();
+          let row_group = parquet_reader.get_row_group(i).unwrap();
+          for j in 0..row_group.num_columns() {
+            writeln!(out, "  Column {}", j).unwrap();
+            let mut page_reader = row_group.get_column_page_reader(j).unwrap();
+            while let Some(page) = page_reader.get_next_page().unwrap() {
+              writeln!(out, "    Page: {}, num_values: {}, size: {}, encoding: {}",
+                page.page_type(),
+                page.num_values(),
+                page.buffer().len(),
+                page.encoding()
+              ).unwrap();
+            }
+          }
+        }
       } else {
         print_file_metadata(&mut std::io::stdout(), &metadata.file_metadata());
       }
