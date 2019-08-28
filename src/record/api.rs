@@ -620,9 +620,10 @@ impl fmt::Display for Field {
 /// Date is displayed in local timezone.
 #[inline]
 fn convert_date_to_string(value: u32) -> String {
-  static NUM_SECONDS_IN_DAY: i64 = 60 * 60 * 24;
-  let dt = Local.timestamp(value as i64 * NUM_SECONDS_IN_DAY, 0).date();
-  format!("{}", dt.format("%Y-%m-%d %:z"))
+  // static NUM_SECONDS_IN_DAY: i64 = 60 * 60 * 24;
+  // let dt = Local.timestamp(value as i64 * NUM_SECONDS_IN_DAY, 0).date();
+  // format!("{}", dt.format("%Y-%m-%d %:z"))
+  format!("{}", value)
 }
 
 /// Helper method to convert Parquet timestamp into a string.
@@ -630,8 +631,9 @@ fn convert_date_to_string(value: u32) -> String {
 /// Datetime is displayed in local timezone.
 #[inline]
 fn convert_timestamp_to_string(value: u64) -> String {
-  let dt = Local.timestamp((value / 1000) as i64, 0);
-  format!("{}", dt.format("%Y-%m-%d %H:%M:%S %:z"))
+  // let dt = Local.timestamp((value / 1000) as i64, 0);
+  // format!("{}", dt.format("%Y-%m-%d %H:%M:%S %:z"))
+  format!("{}", value)
 }
 
 /// Helper method to convert Parquet decimal into a string.
